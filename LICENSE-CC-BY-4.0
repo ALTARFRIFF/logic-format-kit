@@ -1,0 +1,14 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+All prose documentation in this repository (everything under docs/, CORE.md,
+README.md, README.en.md) is licensed under CC BY 4.0:
+https://creativecommons.org/licenses/by/4.0/legalcode
+
+You are free to share and adapt the material for any purpose, provided you
+give appropriate credit and indicate if changes were made.
+
+Note: This license covers the documentation text only. All source code is
+MIT licensed (see LICENSE-MIT). The formats described here were derived
+independently by observing files Logic Pro wrote; Logic Pro, Logic, and the
+third-party plug-ins named in this documentation are trademarks of their
+respective owners, and nothing here is affiliated with or endorsed by them.
