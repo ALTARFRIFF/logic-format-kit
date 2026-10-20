@@ -1,0 +1,9 @@
+# Waves Abbey Road RS124 (aufx RS1M ksWV) — AU parameter -> state-blob token index
+# 方法：跨 40 个出厂预设做仿射拟合（AU = a*token + b），全样本误差 < 1e-4。
+# 只列出唯一命中的；其余 57 个参数在出厂预设里恒定，需要真实工程里改过的状态才能定位。
+param_id	param_name	token	a	b
+1	Recovery	277	1	0
+2	Super Fuse	279	1	0
+5	Mix	281	10	0
+6	Output Attenuator	412	20.833333	500
+428	Auto Makeup	428	1	0

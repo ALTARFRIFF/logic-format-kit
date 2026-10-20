@@ -298,7 +298,7 @@ AudioUnitGetProperty(inst, kAudioUnitProperty_ClassInfo,
 | Swivel Audio Spread | `aufx SPRD SWAU` | `jucePluginState` | — | VC2! | ✅ |
 | ADPTR Sculpt | `aufx SCPT Adpt` | `jucePluginState` | — | VC2! | ✅ |
 | Knif Audio Soma / SPL TwinTube | `Soma` / `SPTT` | `data` | — | Pmtr | ✅ |
-| Waves Abbey Road RS124 | `aufx RS1M ksWV` | `Waves_XPst` | 6053 | XPst | ❌ 参数只读，但**预设可加载** |
+| Waves Abbey Road RS124 | `aufx RS1M ksWV` | `data` | 516 | — | ✅ `waves.py`：`[u32 id][f32 值]` 记录表 |
 
 键名本身也有用：`ClassInfo` 字典里除状态外还有 `subtype` / `manufacturer` / `type` / `version` / `name` / `element-name`。
 
@@ -334,52 +334,27 @@ ClassInfo 里 jucePluginState            → 2417 字节逐字节不变   ❌ �
 1. **不要相信 `status == noErr`。** 必须回读参数值 + 对比状态 blob，两步都过才算成功。
 2. **参数可能只读。** `classinfo.py` 的自检因此会连试 4 个参数，而不是赌第一个。
 
-### 8.5 Waves：状态是纯文本 XML
+### 8.5 Waves：真状态在 516 字节的 `data` 里，不在 XML 里
 
-`Waves_XPst` 的布局（RS124，6053 字节）：
+Waves 的 ClassInfo 带**两个**状态键，长得像同一件事，其实不是：
 
-```
-00 00 17 a5   u32 BE 总长
-00 00 00 04 / 00 00 00 01
-"RS1M" "setA"
-00 00 17 89   u32 BE 段长
-"XPst"
-<PresetChunkXMLTree version="3">
-  … <Parameters Type="RealWorld"> 410 个十进制实数 + 19 个 '*' …
-  … <PluginSpecificXMLData> …
-```
+| 键 | 大小 | 真实作用 |
+|---|---|---|
+| `Waves_XPst` | 5–6 KB | 纯文本 `<PresetChunkXMLTree>`，`<Parameters Type="RealWorld">` 是 **429 个扁平 token**。**插件会丢弃手改过的副本** |
+| **`data`** | **恒定 516 B** | **真状态**：12 字节头 + **63 条 8 字节记录 `[u32 BE 参数 id][f32 BE 值]`** |
 
-**全家族同一套**，不需要一个插件逆向一次。剩下的只是"参数名 → 第几个数字"的索引表（410 个数字，而 AU 只对外暴露 63 个参数）。
+判据（`logicfmt/waves.py` 的 `is_waves()`）：长度 516、`(len-12) % 8 == 0`、每条的 id 是互不重复的小序号、值有限。
 
-Waves 的 AU 参数对外**只读**（`AudioUnitSetParameter` 返回成功但值不变，elem 1/2 直接 `-10877`），但**预设可以加载**：`--preset 7` 让 `Waves_XPst` 从 6053 变成 5769 字节。
+**参数 id 就存在记录里**，所以不需要「参数名 → 第几个数字」的对照表——插件自己的序列化就写着它。
 
----
+写入 = 等长 `pack_into` 那个 f32，不移动任何字节、不碰任何长度字段。
 
-## 9. 厂家覆盖现状（诚实版）
+实测（`aufx RS1M ksWV`，Abbey Road RS124）：把 id 6 写成 250.0、id 5 写成 500.0、id 1 写成 3.0，把 blob 交回插件，插件自己的参数回读就是 **250 / 500 / 3**。
 
-| 厂家 | L1 直写 | L2 兜底 | 说明 |
-|---|---|---|---|
-| FabFilter | ✅ | ✅ | FFBS / flags 两种容器都解了 |
-| Plugin Alliance / Brainworx / SPL / elysia / Maag | ✅ | ✅（逐字节等价） | 全是 Pmtr |
-| Valhalla / Swivel / ADPTR / 多数 JUCE | ✅ 视 XML 形态 | ✅ | VC2! |
-| iZotope ERA | ✅ | ✅ | VC2! |
-| iZotope Nectar / Neutron / Ozone / RX | 🟡 结构已解（zlib+JSON） | ✅ | 见 §6 |
-| accusonus ERA 6 | ✅ 读 | ⚠️ 写不生效 | 见 8.4 |
-| **Waves** | 🟡 只能到「预设」级：XML 已解，但**没有参数名对照表**（实测）| ❌ 只读，但预设可加载 | 见 8.5 |
-| Polyverse `PvWr` | ❌ | ✅ | 44 字节，本来几乎无参数 |
-| Slate Digital `FrAr` | ❌ | ✅ | 2522 字节，非 zlib |
+#### 三条走错的路（都是实测，留作教训）
 
-**结论：不存在"某个品牌全部支持"这种说法，只有"某个容器全部支持"。** 覆盖判据永远是 magic，不是厂家名。而 L2 让"未知容器"不再是死路——只要插件能实例化，它就能自己写出合法状态。
+1. **手改 XML token 无效**：410 个 token 逐个改一位再 load，**0 个参数变化**——插件直接忽略手改的 XML。
+2. **驱动参数再读回也无效**：`AudioUnitSetParameter` 对 Waves 返回成功但值不变（参数对外只读），所以「设参数 → 存状态 → 看哪个 token 动」也走不通。
+3. **跨预设做仿射拟合**能对出 5 个参数（Recovery=277、Super Fuse=279、Mix=281、Output Attenuator=412、Auto Makeup=428），但其余 57 个恒定参数无从定位——因为定位的对象本来就是副本。
 
-#### 8.5.1 为什么「参数索引表」不存在（实测否证）
-
-一度认为只需补一张「参数名 → 第几个数字」的表。实测 `Abbey Road RS124` 后证明**这张表没有任何来源**：
-
-- `Waves_XPst` 里 `<Parameters Type="RealWorld">` 是 **429 个扁平 token**（`*` = 未设置）；6 个预设逐个解码，长度都是 429，其中 39 个位置随预设变化。
-- 整份 XML 只有 14 种元素、**只有 2 个 `name` 属性且都是预设名**；`PluginSpecificXMLData` 是空元素。**插件不吐参数名。**
-- 反向也不行：`au_dump --tsv --values` 每次都新建 AU 实例，6 个预设下 63 个 AU 参数的值**完全不变**（变化数 = 0），无法用 AU 值反推位置。
-
-**因此 Waves 的能力边界是**：读状态 ✅、按预设切换 ✅（`--preset N`，blob 6053 → 5769 等）、按名字改单个参数 ❌。
-
-要补对照表只能靠人工「一次只动一个控件」的样本，成本 = 控件数 × 一次保存；本项目不投入。
-走向：**Waves 用预设级控制**——`classinfo.class_info(au_type, subtype, manufacturer, preset=N)` 取合法 blob，再按 `.cst` 的等长写入路径拼进去。
+能力边界（已更新）：读状态 ✅、按预设切换 ✅、**按名字改单个参数 ✅**（`logicfmt/waves.py`）。

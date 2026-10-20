@@ -117,7 +117,7 @@ classinfo.write_blob_into_cst(cst_bytes, insert_index, ci["blob"])
 - **FFBS 的浮点数就是 AU 参数原值**，不做换算（Pro-Q 4 的频率量程本身就是 log2）。
 - **JUCE 的参数 ID 是名字哈希**（`105897776` 这种），不是序号——只能按 ID 或名字定位。
 - **已知例外**：accconus ERA 6 接受参数值（回读都变了），但它自己吐出的 `jucePluginState` 不变。所以**不能相信 `status == noErr`**，必须回读参数值 + 对比 blob 两步都过。
-- Waves 的参数对外只读，但**预设可以加载**，且状态是纯文本 XML（`<PresetChunkXMLTree>` + `<Parameters Type="RealWorld">` 实数列表），全家族同一套。
+- Waves 的**真状态**是 ClassInfo 里 516 字节的 `data`：12 字节头 + 63 条 `[u32 BE 参数 id][f32 BE 值]`。同名的 `Waves_XPst`（纯文本 XML，429 token）是**副本**，手改会被插件丢弃。AU 参数对外只读，所以只能走 L1 直写 f32。
 
 详见 `docs/02-au-containers.md §8`。
 
@@ -151,7 +151,7 @@ classinfo.write_blob_into_cst(cst_bytes, insert_index, ci["blob"])
 | 2 | **插入增长**（真插入一个定长记录） | 事件数受模板槽位数限制 | 换更大的模板 |
 | 3 | **和弦音阶枚举**（19 个值） | 不能写"Lydian"这类音阶 | 只能用 Auto，或在 Logic 里设 |
 | 4 | **iZotope 头 16 字节的第 1 个 u32** | 写入前无法确认该字段含义 | 原样保留（实测可行） |
-| 5 | **Waves（WaveShell）** | 702 个参数表但容器未解 | 走 L2，或运行时 |
+| 5 | **Waves（WaveShell）** | ✅ `data` 记录表（id 存在记录里） | L1 直写 f32 |
 | 6 | **删除** | 和弦记录删不掉（Logic 会保留记录） | 用 `No Chord` 事件代替 |
 | 7 | 拍号/调号位置的 `+38400` 偏移含义 | 公式已验证，但为什么是这个常数不明 | 照公式用 |
 
@@ -198,4 +198,4 @@ python3 logicfmt/build_test_mk.py --dry-run
 | 真插入（文件变长） | `insert_in_payload` + `seal` | ✅ 已验证（往 qSvE 插记录） |
 | Marker / Tempo / 自动化 / MIDI 区域 | 已定位容器 | ❌ | 自动化轨是 `rpyH` |
 | 插件参数 | ✅ | ✅ | 见 `docs/02`，98% 状态数 |
-| 任意插件参数（通用兜底） | ✅ | ⚠️ | L2 ClassInfo；Waves 只读，但预设可载 |
+| 任意插件参数（通用兜底） | ✅ | ✅ | L2 ClassInfo；Waves 走 `data` 记录表 |

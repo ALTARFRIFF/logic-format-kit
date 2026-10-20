@@ -6,7 +6,8 @@
 import importlib
 import sys
 
-MODULES = ["au_state", "project", "mixer", "chord", "meterkey", "tempo", "classinfo"]
+MODULES = ["au_state", "project", "mixer", "chord", "meterkey", "tempo",
+           "classinfo", "waves"]
 
 
 def main():

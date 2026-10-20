@@ -25,7 +25,7 @@ This kit decodes those formats far enough to read and write them directly, and �
 | Write plug-in parameters (Plugin Alliance family) | ✅ **measured** | Pmtr container; includes SPL / elysia / Maag / Brainworx |
 | Write plug-in parameters (Valhalla / JUCE) | ✅ **measured** | VC2! XML |
 | Write plug-in parameters (iZotope) | 🟡 **decoded, not round-tripped** | 16-byte header + zlib + JSON |
-| Write plug-in parameters (Waves) | 🟡 **XML decoded, parameter index table missing** | parameters are read-only to hosts, but presets load |
+| Write plug-in parameters (Waves) | ✅ **`data` record table decoded** | `[u32 param id][f32 value]`; f32 patched in place |
 | Write **any** plug-in parameter without knowing its container | ✅ **verified on 8 plug-ins / 6 families** | L2 `logicfmt/classinfo.py`, see below |
 | Write `.logicx` time signature (any bar) | ✅ **measured** | passed a 6-point acceptance check |
 | Write `.logicx` key signature (any bar, major/minor, sharps/flats) | ✅ **measured** | 7 files, 13 records, no exceptions |
