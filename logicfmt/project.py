@@ -1400,6 +1400,19 @@ def add_stack(data, kind="summing", name=None, rnd=None):
                     and ch[i - 1].payload[2] == 0x00):
                 ch[i - 1], ch[i] = ch[i], ch[i - 1]
                 break
+        # 新的 `14` 行要**紧贴在最后一个 `14` 行之前**，而不是跟在第一个 `14` 行后面：
+        # 真值 `_S-STACK` 的次序是 `14/22, 00/18, 00/19, 14/23, 14/20, 00/21`，新增的 `14/23`
+        # 落在两个 `00` 之后。相对次序（22, 23, 20）本来就对，差的是与 `00` 行的交错。
+        def _rows14():
+            return [i for i, c in enumerate(ch)
+                    if c.tag == "karT" and c.length == 58 and c.payload[2] == 0x14]
+        r14 = _rows14()
+        if len(r14) >= 3:
+            ords = {i: int.from_bytes(ch[i].payload[8:12], "little") // 4 for i in r14}
+            newest = max(ords, key=lambda i: ords[i])
+            if r14[-1] - newest != 1:
+                item = ch.pop(newest)
+                ch.insert(_rows14()[-1], item)
 
     out2 = seal(ch, head)
     # `normalize_counters` 不幂等：第一遍新块仍是 >=250<<16 的占位值，进不了
