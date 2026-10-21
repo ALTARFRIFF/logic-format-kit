@@ -16,3 +16,4 @@ mixer        推子 / 声像 / 静音 / 独奏 / 输出 / Send
 
 __all__ = ["au_state", "au_batch", "classinfo", "mkpatch", "chord",
            "meterkey", "tempo", "project", "mixer"]
+# markers  — Marker 位置（qSvE 内 48 字节记录，移动已验证）
