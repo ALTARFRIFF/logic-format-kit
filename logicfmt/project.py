@@ -1347,9 +1347,6 @@ def add_stack(data, kind="summing", name=None, rnd=None):
                 pl[86] = 1
                 pl[94] = 1
                 pl[123] = 2
-                if pl[221:237] == b"\0" * 16:
-                    import uuid as _uuid
-                    pl[221:237] = _uuid.uuid1().bytes
                 ch[i] = _clone(c, bytes(pl))
                 break
 
@@ -1413,6 +1410,23 @@ def add_stack(data, kind="summing", name=None, rnd=None):
             if r14[-1] - newest != 1:
                 item = ch.pop(newest)
                 ch.insert(_rows14()[-1], item)
+        # 11. Stack 的「roster UUID」要写进**三处**（实测 `_S-STACK` 里同一个 UUID 出现 3 次）：
+        #     辅助条（`OCuA:237` `payload[4]==0x42`）的 `+221`、子轨条（`0x40`）的 `+205`、
+        #     以及被顶替的那条 `OCuA:201` 行头的 `+153`。漏写这三处时 Logic 打不开工程却也不报错，
+        #     表现是子轨的 output 解析不出 bus（回退成 Stereo Output）。
+        auxes = [(i, c) for i, c in enumerate(ch) if c.tag == "OCuA" and c.length == 237
+                 and len(c.payload) > 4 and c.payload[4] == 0x42]
+        plains = [(i, c) for i, c in enumerate(ch) if c.tag == "OCuA" and c.length == 237
+                  and len(c.payload) > 221 and c.payload[4] == 0x40]
+        rows201 = [(i, c) for i, c in enumerate(ch) if c.tag == "OCuA" and c.length == 201
+                   and len(c.payload) > 169 and c.payload[4] == 0x42 and c.payload[6] == 0x00]
+        if auxes and plains and rows201:
+            roster = int(uuid.uuid1().int).to_bytes(16, "big")
+            for idx, off in ((auxes[-1][0], 221), (plains[0][0], 205), (rows201[-1][0], 153)):
+                c = ch[idx]
+                pl = bytearray(c.payload)
+                pl[off:off + 16] = roster
+                ch[idx] = _clone(c, bytes(pl))
 
     out2 = seal(ch, head)
     # `normalize_counters` 不幂等：第一遍新块仍是 >=250<<16 的占位值，进不了
