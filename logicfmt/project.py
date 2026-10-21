@@ -1337,7 +1337,7 @@ def add_stack(data, kind="summing", name=None, rnd=None):
             if c.tag == "karT" and c.length == 58 and c.payload[2] == 0x01:
                 pl = bytearray(c.payload)
                 pl[40:44] = bytes.fromhex("e0001040")
-                pl[52:56] = b"\x70\x00\x00\x00"
+                pl[52:56] = b"\x00\x00\x00\x00"
                 ch[i] = _clone(c, bytes(pl))
         for i, c in enumerate(ch):
             if c.tag == "OCuA" and c.length == 237 and c.payload[4] == 0x42:
@@ -1410,7 +1410,20 @@ def add_stack(data, kind="summing", name=None, rnd=None):
             if r14[-1] - newest != 1:
                 item = ch.pop(newest)
                 ch.insert(_rows14()[-1], item)
-        # 11. Stack 的「roster UUID」要写进**三处**（实测 `_S-STACK` 里同一个 UUID 出现 3 次）：
+        # `+14 = 0x01` / `+40 = 0x20` 这两个标记不在 `payload[2]==0x01` 那一条上，而在**紧随其后的
+        # 那条 `0x00`** 上（真值 chunk 415 是 0x01、chunk 416 才有这两个标记）。
+        for i, c in enumerate(ch):
+            if c.tag == "karT" and c.length == 58 and c.payload[2] == 0x01:
+                if i + 1 < len(ch):
+                    nxt = ch[i + 1]
+                    if nxt.tag == "karT" and nxt.length == 58:
+                        pl = bytearray(nxt.payload)
+                        pl[14] = 0x01
+                        pl[40] = 0x20
+                        ch[i + 1] = _clone(nxt, bytes(pl))
+                break
+    
+    # 11. Stack 的「roster UUID」要写进**三处**（实测 `_S-STACK` 里同一个 UUID 出现 3 次）：
         #     辅助条（`OCuA:237` `payload[4]==0x42`）的 `+221`、子轨条（`0x40`）的 `+205`、
         #     以及被顶替的那条 `OCuA:201` 行头的 `+153`。漏写这三处时 Logic 打不开工程却也不报错，
         #     表现是子轨的 output 解析不出 bus（回退成 Stereo Output）。
