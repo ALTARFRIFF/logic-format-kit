@@ -34,10 +34,13 @@ This kit decodes those formats far enough to read and write them directly, and �
 | Read/write aux / stack main tracks (kind, name) | ✅ **verified** | `ivnE(467)`, one byte `+155` (aux / summing / folder) |
 | Stack membership | ✅ **verified** | folder = strip `+110`; summing = output routing |
 | Create an audio track from scratch (**runtime**) | ✅ **usable** | Logic creates it, everything else is offline, see `docs/07` |
-| Create an audio track from scratch (**pure offline**) | 🟡 **recipe fully decoded, code not written** | 9 chunk deltas + the four `gnoS` insertions are measured, see `docs/07` |
-| Create a stack / aux from scratch | 🟡 membership writable, main-track objects not cracked | edit an existing one, or use the runtime |
+| Create an audio track from scratch (**pure offline**) | ✅ **verified in Logic** | `logicfmt/project.py: add_audio_track()`, see `docs/07` |
+| Create a summing stack from scratch | ✅ runtime / 🟡 pure offline | offline: row + strip correct, Logic does not expose the disclosure arrow |
 | Real insertion (grow the file) | ✅ **verified** | `insert_in_payload` + `seal`, tested on a `qSvE` record |
-| Markers | ✅ move/rename verified · 🟡 create offline unresolved (record & name counts both gate, adding both still does not raise it) | `logicfmt/markers.py` |
+| Markers | ✅ move/rename verified · 🟡 create offline unresolved | `logicfmt/markers.py`; create via the runtime tool |
+| MIDI notes (add / edit inside a region) | ✅ **verified in Logic** | `logicfmt/midi.py`: 32-byte records in a `qSvE` container |
+| MIDI controllers (CC64 sustain / CC11 expression) | 🟡 record located (`0xb0`, 48 bytes, `+12` = CC number), not written | value field is a normalised 32-bit quantity |
+| Create a MIDI region itself | 🟡 needs region object + track row + registry | same weight as creating a track |
 | Generate a `.logicx` from nothing | ❌ not recommended | template + edit |
 | Insert/delete fixed-size records | ❌ not implemented | use template slots |
 | Generate a `.logicx` from scratch | ❌ not recommended | template + rewrite |
