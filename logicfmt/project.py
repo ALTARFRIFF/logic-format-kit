@@ -1167,6 +1167,68 @@ def _max_env_index(d, ch):
     return best
 
 
+def _folderify(res, base_data):
+    """把 `add_stack(kind="summing")` 的输出改造成 **Folder Stack**。
+
+    实测配方（`_F-FOLDER` 对照，见 docs/PROJECTDATA-FINDINGS.md §43.4）：
+    ① `nCuA` 1224 → 1228；② 还回被 aux 条三块顶替掉的那格空行头；
+    ③ 文件夹条 `OCuA:237`（`payload[4]=0x46`）+ 覆盖块 `UCuA:350` 插在 `Master` 之后；
+    ④ `ivnE:469` 的 `+155` 改 `0x14`，其 `+453` 的 UUID 写进条 `+189`；
+    ⑤ 最后一个 `qeSM:305` → `qeSM:307`；⑥ 新的 `14` 行移到末尾 `00/0` 行之前。
+    """
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dd = os.path.join(here, "templates", "donors")
+
+    def dn(n):
+        return chunks(open(os.path.join(dd, n), "rb").read())[0]
+
+    strip, cover = dn("folder_strip.bin"), dn("folder_cover.bin")
+    ge, ncua = dn("folder_qesm307.bin"), dn("folder_ncua.bin")
+    head = res[:24]
+    sc = list(chunks(res))
+    ch0 = list(chunks(base_data))
+    for i, c in enumerate(sc):
+        if c.tag == "nCuA" and c.length == 1224:
+            sc[i] = ncua
+            break
+    # 新条是**顶替**了基座那一格空行头：所以取「基座在此处是 OCuA:201」的那一条，
+    # 而不是基座本来就有的 Stereo Out / Master 条（它们也是 OCuA:237 + 303 + 348）。
+    k = next(i for i, c in enumerate(sc)
+             if c.tag == "OCuA" and c.length == 237
+             and i < len(ch0) and ch0[i].tag == "OCuA" and ch0[i].length == 201)
+    del sc[k:k + 3]
+    mi = next(i for i, c in enumerate(sc)
+              if c.tag == "OCuA" and c.length == 201
+              and c.payload[61:77].split(b"\0")[0] == b"Master")
+    sc[mi + 1:mi + 1] = [strip, cover]
+    env_i = max(i for i, c in enumerate(sc)
+                if c.tag == "ivnE" and c.length == 469)
+    pl = bytearray(sc[env_i].payload)
+    pl[155] = 0x14
+    uid = bytes(pl[453:469])
+    sc[env_i] = with_payload(sc[env_i], bytes(pl))
+    spl = bytearray(sc[mi + 1].payload)
+    spl[189:205] = uid
+    sc[mi + 1] = with_payload(sc[mi + 1], bytes(spl))
+    # ⑤ `qeSM:305 -> 307` 指的不是"最后一个"，而是**紧接在 `karT:58` 行组之前**那一条
+    sc[next(i for i, c in enumerate(sc)
+            if c.tag == "qeSM" and c.length == 305
+            and i + 1 < len(sc) and sc[i + 1].tag == "karT" and sc[i + 1].length == 58)] = ge
+    rows = [i for i, c in enumerate(sc) if c.tag == "karT" and c.length == 58]
+    o14 = [i for i in rows if sc[i].payload[2] == 0x14]
+    if o14:
+        mx = max(o14, key=lambda i: int.from_bytes(sc[i].payload[8:12], "little"))
+        t = [i for i in rows if sc[i].payload[2] == 0x00
+             and int.from_bytes(sc[i].payload[8:12], "little") == 0][-1]
+        if mx != t - 1:
+            item = sc.pop(mx)
+            rows2 = [i for i, c in enumerate(sc) if c.tag == "karT" and c.length == 58]
+            t2 = [i for i in rows2 if sc[i].payload[2] == 0x00
+                  and int.from_bytes(sc[i].payload[8:12], "little") == 0][-1]
+            sc.insert(t2, item)
+    return rebuild(sc, head)
+
+
 def add_stack(data, kind="summing", name=None, rnd=None):
     """在工程末尾**新建**一条 Stack（Summing / Folder）主行。
 
@@ -1200,24 +1262,6 @@ def add_stack(data, kind="summing", name=None, rnd=None):
     kind = (kind or "summing").lower()
     if kind not in ("summing", "folder"):
         raise ValueError("kind 只能是 'summing' 或 'folder'")
-    if kind == "folder":
-        raise NotImplementedError(
-            "Folder Stack 的纯离线新建**尚未实现**（Summing 已可用）。"
-            "配方与 donor 都已就位，差的是把下面四处接进 add_stack：\n"
-            "  ① 条覆盖块：单个 `UCuA:350`，不是 Summing 的 `UCuA:303`+`UCuA:348`。\n"
-            "     它的载荷是 **NSKeyedArchiver 归档**（`payload[:22]` = "
-            "`40 00 00 00 07 00 02 00 00 00 35 12 00 00 00 00 3a 01 00 00` + `bplist00`），"
-            "     所以不能像早期代码那样「补 47 个零字节」得来 —— 必须用 "
-            "`templates/donors/folder_cover.bin`（386 B）。\n"
-            "  ② 新条是 `OCuA:237` 但 `payload[4] = 0x46`（Summing 是 `0x42`），"
-            "混音器名形如 `Sub 1` —— 用 `templates/donors/folder_strip.bin`（273 B）。\n"
-            "  ③ `nCuA` 要 +4（1224 → 1228），Summing 是把它还原。\n"
-            "  ④ 尾部 `qeSM`：既有 `qeSM:305` 变成 **`qeSM:307`**（内容也变，不只是一条新增），"
-            "另有一条 `qeSM:309` —— 用 `templates/donors/folder_qesm307.bin`（343 B）。\n"
-            "  ⑤ 通道对象 `ivnE:469` 用 `+155 = 0x14`（`templates/donors/stack_folder.bin`）。\n"
-            "完整字节级对照见 docs/PROJECTDATA-FINDINGS.md §43。"
-            "在此之前请用 Logic 自带的 Create Folder Stack，或运行时 logic_duplicate_track()。")
-
     ch0 = list(chunks(data))
     # 「音频轨条数」计数器：`add_audio_track` 会把它们 +1，但 Stack 主通道是 aux，
     # 不是音频轨，所以这里先把原值记下来，末尾还原（实测 `_S-BASE`/`_S-STACK` 三处恒定）。
@@ -1331,7 +1375,7 @@ def add_stack(data, kind="summing", name=None, rnd=None):
     #    （音频轨是 0x14），且它出现在 +8 相同的一对记录中的**前一个**。
     #    `_S-BASE`（1 轨、无 Stack）的 +2 序列里 0x01 出现 0 次；
     #    `_S-STACK`（1 轨 + Sum 1）里出现在 +8=23 那一对上。
-    if kind == "summing":
+    if kind in ("summing", "folder"):
         recs = [(i, c) for i, c in enumerate(ch) if c.tag == "karT" and c.length == 58]
         spans = {}
         for i, c in recs:
@@ -1406,7 +1450,7 @@ def add_stack(data, kind="summing", name=None, rnd=None):
     # 10. 行序：Stack 主行（`karT:58` +2 = 0x01）必须排在它的子轨行之前。
     #     实测 `_S-STACK` 是 `01` 在前、`00` 在后；`add_audio_track` 追加出来的顺序是反的，
     #     只把这对相邻块交换即可（其余 `14` 组的次序由同一次插入位置决定）。
-    if kind == "summing":
+    if kind in ("summing", "folder"):
         for i in range(1, len(ch)):
             if (ch[i].tag == "karT" and ch[i].length == 58 and ch[i].payload[2] == 0x01
                     and ch[i - 1].tag == "karT" and ch[i - 1].length == 58
@@ -1512,7 +1556,7 @@ def add_stack(data, kind="summing", name=None, rnd=None):
                 b[base + 923:base + 924] = keep_ctr[2]
                 break
         res = bytes(b)
-    return res
+    return _folderify(res, data) if kind == "folder" else res
 
 
 def _stack_donor(kind="summing"):
