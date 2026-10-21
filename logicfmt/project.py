@@ -762,7 +762,7 @@ def _clone(src, payload: bytes, idx=None):
         struct.pack_into("<I", raw, ID_OFF, (idx << ID_SHIFT) & 0xFFFFFFFF)
     return Chunk(0, src.tag, len(payload), bytes(raw))
 
-def add_audio_track(data, name=None, rnd=None):
+def add_audio_track(data, name=None, rnd=None, _shift_env_ids=True):
     """在工程末尾**新建**一条音频轨。
 
     验收：对 `_TRK1`（2 轨）执行后，与真实 `_TRK2`（3 轨）对比 ——
@@ -837,7 +837,8 @@ def add_audio_track(data, name=None, rnd=None):
     #     （全局改会让 258 个编曲区行头一起变，差异从 429 涨到 935）。
     # `ivnE` 的 u16 @+82 每条新轨统一 +66
     for i, c in enumerate(ch):
-        if c.tag == "ivnE" and c.length in (469, 471, 473) and c.payload[160:166] != b"Audio ":
+        if (_shift_env_ids and c.tag == "ivnE" and c.length in (469, 471, 473)
+                and c.payload[160:166] != b"Audio "):
             p = bytearray(c.payload)
             v = (p[82] | (p[83] << 8)) + 66
             p[82] = v & 0xFF
@@ -1231,7 +1232,41 @@ def add_stack(data, kind="summing", name=None, rnd=None):
     n_audio = len(audio_strip_runs(ch0))
     default_name = ("Sum %d" if kind == "summing" else "Folder %d") % (n_audio + 1)
     ncu0 = [c for c in ch0 if c.tag == "nCuA"]
-    out = add_audio_track(data, name=name or default_name, rnd=rnd)
+    out = add_audio_track(data, name=name or default_name, rnd=rnd,
+                          _shift_env_ids=False)
+    # 既有通道对象的 id（u16 LE @+82）**不能让位**：真值 `_S-STACK` 里它们与 `_S-BASE`
+    # 完全相同（`0x4b / 0x9f / 0xf3 / 0x47 / 0x09`），而 `add_audio_track` 的「+66」会把
+    # 它们整体推高，导致 Logic 找不到 bus 的接收者。这里还原既有 id，并给新建的通道对象
+    # 分配一个未被占用的 id。
+    _orig = {}
+    for _c in chunks(data):
+        if _c.tag == "ivnE" and len(_c.payload) > 176:
+            _orig[bytes(_c.payload[160:176])] = _c.payload[82] | (_c.payload[83] << 8)
+    _chs = chunks(out)
+    _used = set()
+    for _i, _c in enumerate(_chs):
+        if _c.tag != "ivnE" or len(_c.payload) <= 176:
+            continue
+        _nm = bytes(_c.payload[160:176])
+        if _nm in _orig:
+            _pl = bytearray(_c.payload)
+            _pl[82] = _orig[_nm] & 0xFF
+            _pl[83] = (_orig[_nm] >> 8) & 0xFF
+            _chs[_i] = with_payload(_c, bytes(_pl))
+            _used.add(_orig[_nm])
+    _fresh = (max(_used) + 1) if _used else 1
+    # 新建的通道对象是**最后一个** `ivnE`（`add_audio_track` 追加出来的）；按名字判断会
+    # 和既有对象撞名，所以这里按位置认定，并保证 id 不与任何既有 id 重复。
+    _last = max(i for i, c in enumerate(_chs) if c.tag == "ivnE" and len(c.payload) > 176)
+    for _i, _c in enumerate(_chs):
+        if _c.tag != "ivnE" or len(_c.payload) <= 176:
+            continue
+        if _i == _last:
+            _pl = bytearray(_c.payload)
+            _pl[82] = _fresh & 0xFF
+            _pl[83] = (_fresh >> 8) & 0xFF
+            _chs[_i] = with_payload(_c, bytes(_pl))
+    out = seal(_chs, out[:24])
     ch = list(chunks(out))
     head = header(out)
     if kind == "summing" and ncu0:
