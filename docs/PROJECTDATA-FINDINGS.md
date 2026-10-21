@@ -3578,3 +3578,14 @@ stack」，现在三角**存在并且能折**，说明 Logic 真的把它当 Sta
 | 通道对象 | `ivnE:469`，`+155=0x10` | `ivnE:469`，**`+155=0x14`** |
 
 `templates/donors/stack_folder.bin` 已在库里，可直接取 `+155=0x14` 的 `ivnE:469`。
+
+### §43.1 · Folder 的三份 donor（已抽出，可直接用）
+
+| 文件 | 块 | 大小 | 要点 |
+|---|---|---|---|
+| `templates/donors/folder_cover.bin` | `UCuA:350` | 386 B | 载荷是 **NSKeyedArchiver 归档**（`40 00 00 00 07 00 02 00 00 00 35 12 …` + `bplist00`），**不能补零造** |
+| `templates/donors/folder_strip.bin` | `OCuA:237` | 273 B | `payload[4] = 0x46`（Summing 是 `0x42`），混音器名 `Sub 1` |
+| `templates/donors/folder_qesm307.bin` | `qeSM:307` | 343 B | 既有 `qeSM:305` 变长而来，内容也变 |
+
+另有 `templates/donors/stack_folder.bin` 提供 `ivnE:469` + `+155 = 0x14` 的通道对象。
+**这五处就是 Folder 与 Summing 的全部差异**；Summing 路径（已验收可折叠）可直接复用其骨架。

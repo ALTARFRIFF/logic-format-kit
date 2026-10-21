@@ -1202,14 +1202,21 @@ def add_stack(data, kind="summing", name=None, rnd=None):
         raise ValueError("kind 只能是 'summing' 或 'folder'")
     if kind == "folder":
         raise NotImplementedError(
-            "Folder Stack 的纯离线新建尚未实现。配方已实测完整（见 "
-            "_templates/PROJECTDATA-FINDINGS.md §40），与 Summing 差三处："
-            "① 覆盖块是单个 UCuA:350（Summing 是 UCuA:303 + UCuA:348 两块）；"
-            "② nCuA 要 +4（Summing 的 add_stack 是把它还原）；"
-            "③ 新 qeSM 长度 307 且由一个既有 qeSM:305 缩 2 字节而来（Summing 是新增 309）。"
-            "暂不交付的原因：Summing 版本本身还产不出可打开的工程（§39），"
-            "Folder 走同一路径只会得到同样不可打开的文件。"
-            "Summing 已可用；Folder 请等待或改用逻辑自带的 Create Folder Stack。")
+            "Folder Stack 的纯离线新建**尚未实现**（Summing 已可用）。"
+            "配方与 donor 都已就位，差的是把下面四处接进 add_stack：\n"
+            "  ① 条覆盖块：单个 `UCuA:350`，不是 Summing 的 `UCuA:303`+`UCuA:348`。\n"
+            "     它的载荷是 **NSKeyedArchiver 归档**（`payload[:22]` = "
+            "`40 00 00 00 07 00 02 00 00 00 35 12 00 00 00 00 3a 01 00 00` + `bplist00`），"
+            "     所以不能像早期代码那样「补 47 个零字节」得来 —— 必须用 "
+            "`templates/donors/folder_cover.bin`（386 B）。\n"
+            "  ② 新条是 `OCuA:237` 但 `payload[4] = 0x46`（Summing 是 `0x42`），"
+            "混音器名形如 `Sub 1` —— 用 `templates/donors/folder_strip.bin`（273 B）。\n"
+            "  ③ `nCuA` 要 +4（1224 → 1228），Summing 是把它还原。\n"
+            "  ④ 尾部 `qeSM`：既有 `qeSM:305` 变成 **`qeSM:307`**（内容也变，不只是一条新增），"
+            "另有一条 `qeSM:309` —— 用 `templates/donors/folder_qesm307.bin`（343 B）。\n"
+            "  ⑤ 通道对象 `ivnE:469` 用 `+155 = 0x14`（`templates/donors/stack_folder.bin`）。\n"
+            "完整字节级对照见 docs/PROJECTDATA-FINDINGS.md §43。"
+            "在此之前请用 Logic 自带的 Create Folder Stack，或运行时 logic_duplicate_track()。")
 
     ch0 = list(chunks(data))
     # 「音频轨条数」计数器：`add_audio_track` 会把它们 +1，但 Stack 主通道是 aux，
