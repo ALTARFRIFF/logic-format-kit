@@ -193,7 +193,7 @@ python3 logicfmt/build_test_mk.py --dry-run
 | 通道条：推子/声像/静音/独奏/输出 | ✅ | ✅ | `logicfmt/mixer.py`，39 条断言 |
 | Send 电平/目的地 | ✅ | ✅（改已有） | 新建 Send 未实现；Pre/Post 语义未定 |
 | 新建音频轨 | ✅ | ✅ | `project.add_audio_track()`；**Logic 实测通过**（`_Y5`/`_Y6`）；通道条身份须同时写 `+189` 与 `ivnE+455` |
-| Aux / Stack 主轨 | `ivnE(467)`，`+155` = `05` Aux / `10` Summing / `14` Folder | ✅ 读、改类型、改名；🟡 离线新建（`add_stack()`，行可建、Stack 语义差 roster UUID）；运行时 `logic_duplicate_track()` ✅ |
+| Aux / Stack 主轨 | `ivnE(467)`，`+155` = `05` Aux / `10` Summing / `14` Folder | ✅ 读、改类型、改名；**✅ 离线新建 Summing**（`add_stack(kind="summing")`，三处 UUID 身份链已通，Logic 实测可折叠、output 正确）；🟡 Folder（配方已完整，`_F-BASE`→`_F-FOLDER` 三处差异写入 findings §43）；运行时 `logic_duplicate_track()` ✅ |
 | Stack 成员关系 | Folder = 轨条 `+110`；Summing = 输出路由 | ✅ 读写 |
 | 真插入（文件变长） | `insert_in_payload` + `seal` | ✅ 已验证（往 qSvE 插记录） |
 | Tempo / 自动化 / MIDI 音符 | ✅ 可写 | ✅ | MIDI 音符在区域的 `qSvE` 容器里 |
