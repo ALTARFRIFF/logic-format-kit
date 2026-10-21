@@ -1390,6 +1390,17 @@ def add_stack(data, kind="summing", name=None, rnd=None):
                 pl = bytearray(c.payload)
                 pl[86] = bus
                 ch[i] = _clone(c, bytes(pl))
+    # 10. 行序：Stack 主行（`karT:58` +2 = 0x01）必须排在它的子轨行之前。
+    #     实测 `_S-STACK` 是 `01` 在前、`00` 在后；`add_audio_track` 追加出来的顺序是反的，
+    #     只把这对相邻块交换即可（其余 `14` 组的次序由同一次插入位置决定）。
+    if kind == "summing":
+        for i in range(1, len(ch)):
+            if (ch[i].tag == "karT" and ch[i].length == 58 and ch[i].payload[2] == 0x01
+                    and ch[i - 1].tag == "karT" and ch[i - 1].length == 58
+                    and ch[i - 1].payload[2] == 0x00):
+                ch[i - 1], ch[i] = ch[i], ch[i - 1]
+                break
+
     out2 = seal(ch, head)
     # `normalize_counters` 不幂等：第一遍新块仍是 >=250<<16 的占位值，进不了
     # 「20..199 批次重编号」分支，所以必须跑两遍（与 `add_audio_track` 一致）。
