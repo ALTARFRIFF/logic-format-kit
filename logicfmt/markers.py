@@ -182,6 +182,92 @@ def add(data, bar=None, tick=None, bar_ticks=3840, name=None,
 
     ⚠️ **未解决，默认拒绝**（`allow_incomplete=True` 才会执行，且结果不可用）。
 
+    已确认的计数规则（20+ 个单变量实验，全部以 `_P7` 7 个 marker 为底）：
+
+        删一条记录      -> count 6   （记录数参与计数）
+        删一个名字对象  -> count 6   （名字数也参与计数 ← §61 新发现）
+        只加一条记录    -> count 7   （不增）
+        只加一个名字    -> count 7   （不增）
+        同时加记录+名字 -> count 7   （**仍不增**，这是尚未解开的不对称）
+
+    新记录（bar 35）不出现、而 bar 30 的名字被新名字按位置覆盖 —— 说明读端停在 7。
+    `count = min(记录, 名字)` 对前五种成立，对「同时加」不成立。
+    剩下只能读代码定案（`userMarkers` / `"%ld Marker(s)#Dict"` 的 xref）。
+
+    已验证可用的替代路径：`mcp__logician__logic_markers create` + AppleScript ⌘S。
+
+    if bar is not None and tick is not None:
+        raise ValueError("bar 与 tick 只能给一个")
+    if bar is None and tick is None:
+        raise ValueError("需要 bar 或 tick")
+    if tick is None:
+        tick = bar_to_tick(bar, bar_ticks)
+    ch = P.chunks(data)
+    head = P.header(data)
+    c = find_marker_chunk(ch)
+    if c is None:
+        raise ValueError("这个工程没有 marker 容器")
+    n = (len(c.payload) - TAIL) // REC
+    if not 0 <= index < n:
+        raise IndexError("index %d 超出 0..%d" % (index, n - 1))
+    raw = bytearray(c.raw)
+    struct.pack_into("<I", raw, P.CHUNK_HEADER + index * REC + 5, tick_to_pos(tick))
+    return P.rebuild([P.Chunk(pos=x.pos, tag=x.tag, length=x.length,
+                             raw=(bytes(raw) if x is c else x.raw)) for x in ch], head)
+
+
+# ---------------------------------------------------------------- 名字对象（qSxT）
+NAME_TAG = "qSxT"
+NAME_MIN = 400            # 名字对象的载荷都在 400 字节以上（RTF 模板固定长度）
+
+
+def _is_name_chunk(chunk):
+    return (chunk.tag == NAME_TAG and len(chunk.payload) > NAME_MIN
+            and b"{\\rtf1" in chunk.payload)
+
+
+def name_chunks(chunks):
+    """所有 marker 名字对象（`qSxT` 里带 RTF 的那些）。"""
+    return [c for c in chunks if _is_name_chunk(c)]
+
+
+def _split_name(payload):
+    """把名字对象拆成 (前段, 旧名字, 后段)。"""
+    i = payload.find(b"{\\rtf1")
+    if i < 0:
+        raise ValueError("名字对象里没有 RTF 头")
+    j = payload.rfind(b"\\cf2 ")
+    if j < 0 or j < i:
+        raise ValueError("名字对象里没有 \\cf2 标记")
+    j += 5
+    k = payload.find(b"}", j)
+    if k < 0:
+        raise ValueError("名字对象里没有收尾花括号")
+    return payload[:j], payload[j:k], payload[k:]
+
+
+def read_name(chunk):
+    return _split_name(chunk.payload)[1].decode("utf-8", "replace")
+
+
+def _build_name(chunk, new_name):
+    """克隆一个名字对象并换名，同时修好两处长度字段（`+0` 与 `+20`）。"""
+    head, _old, tail = _split_name(chunk.payload)
+    out = bytearray(head + new_name.encode("utf-8") + tail)
+    # 载荷 +27 = 1：「本对象携带显式名字」。写成 0 时 Logic 把它当成无名占位，
+    # 整个名字对象不参与 marker 计数 —— `_M32`（6 个）与 `_M34`（7 个）的差异仅此 1 字节。
+    out[27] = 1
+    struct.pack_into("<I", out, 0, len(out))
+    struct.pack_into("<I", out, 20, len(out))
+    return bytes(out)
+
+
+def add(data, bar=None, tick=None, bar_ticks=3840, name=None,
+        allow_incomplete=False):
+    """新增一个 marker（记录 48 字节 + 一个名字对象），位置按小节排序。
+
+    ⚠️ **未解决，默认拒绝**（`allow_incomplete=True` 才会执行，且结果不可用）。
+
     实测（`_TL-MARK2` 3 marker → `_H-MARK` 4 marker，Logic 自己加的）增量是：:
 
         qSvE:160 -> qSvE:208      容器 +48 字节           ← 本函数能做
