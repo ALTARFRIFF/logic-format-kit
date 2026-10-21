@@ -1188,6 +1188,13 @@ def add_stack(data, kind="summing", name=None, rnd=None):
     `output: "Stereo Output"`、`volume_db: 0`、`pan: "0"` —— 与用户亲手做的
     `_S-STACK` 逐项一致。**尚未成立的一点**：`logic_set_track_stack` 仍报
     「no track stack disclosure arrow」，即 Logic 还不把它当 Stack 呈现；
+    **已知限制（未通过验收，勿当完成品用）**：`add_stack` 产出的文件在结构上与真值
+    `_S-STACK` 一致（尺寸/块数/签名序列/`karT:58` 行序/通道条字段全部相同），Logic 也能
+    正确显示 `Sum 1` 在 `Audio 1` 之上、混音器 4 条与真值一致；但**子轨的 output 仍解析成
+    `Stereo Output`，而不是指向新 Stack 的 bus**，因此 Logic 还不把它当真正的 Summing Stack。
+    已试过并排除：条 `+189`/`+221`、行头 `+153` 三处 roster UUID；既有通道对象 id 让位；
+    新通道对象的 uid 与 id。详见 `_templates/PROJECTDATA-FINDINGS.md` §A-13～A-19。
+
     最可能是「还没有子轨」（参考样本有 2 条），需要把子轨 output 指到它的 bus 才算完整。
     """
     kind = (kind or "summing").lower()
@@ -1234,39 +1241,6 @@ def add_stack(data, kind="summing", name=None, rnd=None):
     ncu0 = [c for c in ch0 if c.tag == "nCuA"]
     out = add_audio_track(data, name=name or default_name, rnd=rnd,
                           _shift_env_ids=False)
-    # 既有通道对象的 id（u16 LE @+82）**不能让位**：真值 `_S-STACK` 里它们与 `_S-BASE`
-    # 完全相同（`0x4b / 0x9f / 0xf3 / 0x47 / 0x09`），而 `add_audio_track` 的「+66」会把
-    # 它们整体推高，导致 Logic 找不到 bus 的接收者。这里还原既有 id，并给新建的通道对象
-    # 分配一个未被占用的 id。
-    _orig = {}
-    for _c in chunks(data):
-        if _c.tag == "ivnE" and len(_c.payload) > 176:
-            _orig[bytes(_c.payload[160:176])] = _c.payload[82] | (_c.payload[83] << 8)
-    _chs = chunks(out)
-    _used = set()
-    for _i, _c in enumerate(_chs):
-        if _c.tag != "ivnE" or len(_c.payload) <= 176:
-            continue
-        _nm = bytes(_c.payload[160:176])
-        if _nm in _orig:
-            _pl = bytearray(_c.payload)
-            _pl[82] = _orig[_nm] & 0xFF
-            _pl[83] = (_orig[_nm] >> 8) & 0xFF
-            _chs[_i] = with_payload(_c, bytes(_pl))
-            _used.add(_orig[_nm])
-    _fresh = (max(_used) + 1) if _used else 1
-    # 新建的通道对象是**最后一个** `ivnE`（`add_audio_track` 追加出来的）；按名字判断会
-    # 和既有对象撞名，所以这里按位置认定，并保证 id 不与任何既有 id 重复。
-    _last = max(i for i, c in enumerate(_chs) if c.tag == "ivnE" and len(c.payload) > 176)
-    for _i, _c in enumerate(_chs):
-        if _c.tag != "ivnE" or len(_c.payload) <= 176:
-            continue
-        if _i == _last:
-            _pl = bytearray(_c.payload)
-            _pl[82] = _fresh & 0xFF
-            _pl[83] = (_fresh >> 8) & 0xFF
-            _chs[_i] = with_payload(_c, bytes(_pl))
-    out = seal(_chs, out[:24])
     ch = list(chunks(out))
     head = header(out)
     if kind == "summing" and ncu0:
@@ -1475,6 +1449,36 @@ def add_stack(data, kind="summing", name=None, rnd=None):
                 pl = bytearray(c.payload)
                 pl[off:off + 16] = roster
                 ch[idx] = _clone(c, bytes(pl))
+
+    # 既有通道对象的 id（u16 LE @+82）不能让位：真值 `_S-STACK` 里它们与 `_S-BASE` 完全相同。
+    # 这一步必须放在 `link_strip_envs`/roster 之后 —— 因为「新对象」的判据是它的 uid
+    # （载荷 `+453..469`）在原始 `data` 里找不到，而那个 uid 是后面才写进去的。
+    _orig = {}
+    for _c in chunks(data):
+        if _c.tag == "ivnE" and len(_c.payload) > 176:
+            _orig[bytes(_c.payload[160:176])] = _c.payload[82] | (_c.payload[83] << 8)
+    _used = set()
+    for _i, _c in enumerate(ch):
+        if _c.tag != "ivnE" or len(_c.payload) <= 176:
+            continue
+        _nm = bytes(_c.payload[160:176])
+        if _nm in _orig:
+            _pl = bytearray(_c.payload)
+            _pl[82] = _orig[_nm] & 0xFF
+            _pl[83] = (_orig[_nm] >> 8) & 0xFF
+            ch[_i] = _clone(_c, bytes(_pl))
+            _used.add(_orig[_nm])
+    _fresh = (max(_used) + 1) if _used else 1
+    for _i, _c in enumerate(ch):
+        if _c.tag != "ivnE" or len(_c.payload) < 469:
+            continue
+        if bytes(_c.payload[453:469]) not in data:
+            _pl = bytearray(_c.payload)
+            _pl[82] = _fresh & 0xFF
+            _pl[83] = (_fresh >> 8) & 0xFF
+            _pl[88] = _fresh & 0xFF
+            _pl[89] = (_fresh >> 8) & 0xFF
+            ch[_i] = _clone(_c, bytes(_pl))
 
     out2 = seal(ch, head)
     # `normalize_counters` 不幂等：第一遍新块仍是 >=250<<16 的占位值，进不了
