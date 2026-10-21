@@ -3238,3 +3238,26 @@ _S-GEN    Sum 1 的 input = null
 这是 Summing Stack 成立的实际标志。所以缺口收敛成一处：**给新 aux 条写入它的输入 bus**。
 
 文件里其余 505 字节差异全是新对象的 16 字节 UUID（新必然不同，不可对齐）。
+
+### A-12 · Stack：通道条字段已与真值逐字节一致，但 bus 没被"登记"
+
+补了两处后（① 子轨输出的 `+92` 写 `<bus+1>`、aux 条 `+86` 写 bus 号；② gnoS 里三处
+「音频轨条数」计数器在 `normalize_counters` **之后**还原 —— 它在 `add_audio_track` 里会 +1，
+但 Stack 主通道是 aux 不是音频轨，真值里这三处恒定），`_S-GEN3` 的三条通道条与 `_S-STACK`
+**逐字节一致**：
+
+```
+              _S-GEN3              _S-STACK
+Audio 1  kind=0x40 +86=0 +92=0200   kind=0x40 +86=0 +92=0200
+Aux 1    kind=0x42 +86=1 +92=0000   kind=0x42 +86=1 +92=0000
+Inst 1   kind=0x43 +86=0 +92=0000   kind=0x43 +86=0 +92=0000
+```
+
+文件大小 132,596 / 452 块 / (tag,length) 序列仍与真值一致，剩余差异 507 字节中 83 段是短
+UUID 片段，其余为长 UUID。
+
+**但 Logic 读回 `Audio 1` 的 output 仍是 `Stereo Output`，真值是 `Monitor Bus`（Bus 1）。**
+
+结论：`+92` 只是一个**索引**，它要解析成 `Monitor Bus` 还需要「Bus 1 这个 bus 对象存在且被
+登记」。也就是说缺口不在通道条字段，而在 **bus/aux 的登记**（与建轨那条 roster UUID 属同一
+类：对象本身的字段全对，但它没进登记表，于是被解析器忽略）。

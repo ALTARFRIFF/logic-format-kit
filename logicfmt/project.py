@@ -1204,6 +1204,16 @@ def add_stack(data, kind="summing", name=None, rnd=None):
             "Summing 已可用；Folder 请等待或改用逻辑自带的 Create Folder Stack。")
 
     ch0 = list(chunks(data))
+    # 「音频轨条数」计数器：`add_audio_track` 会把它们 +1，但 Stack 主通道是 aux，
+    # 不是音频轨，所以这里先把原值记下来，末尾还原（实测 `_S-BASE`/`_S-STACK` 三处恒定）。
+    _g0 = next((c for c in ch0 if c.tag == "gnoS"), None)
+    keep_ctr = None
+    if _g0 is not None and len(_g0.payload) >= 924:
+        keep_ctr = (_g0.payload[210:212], _g0.payload[214:216], _g0.payload[923:924])
+    # 新 Stack 占用的 bus：已有 aux 条数 + 1（第一座 Stack → Bus 1）
+    n_aux = sum(1 for c in ch0
+                if c.tag == "OCuA" and c.length in (237, 241, 249) and c.payload[4] == 0x42)
+    bus = n_aux + 1
     # 找「通道类」的 ivnE:469 —— 判别字节 +155：0x10 = aux/stack，0x09 = Click，
     # 0x14 = Master（注意 467 谱系里 0x14 是 folder，两个谱系语义不同）。
     want_byte = 0x10 if kind == "summing" else 0x14
@@ -1367,10 +1377,35 @@ def add_stack(data, kind="summing", name=None, rnd=None):
                         ch[i] = _clone(c, bytes(pl))
                     break
 
+    # 9. 子轨路由 + 计数器还原（这两项决定 Summing Stack 是否真的成立）
+    if kind == "summing":
+        import struct as _st
+        for i, c in enumerate(ch):
+            if c.tag == "OCuA" and c.length in (237, 241, 249) and c.payload[4] == 0x40:
+                pl = bytearray(c.payload)
+                pl[92:94] = _st.pack("<H", bus + 1)   # 输出改到新 aux 的 bus
+                ch[i] = _clone(c, bytes(pl))
+            elif (c.tag == "OCuA" and c.length in (237, 241, 249)
+                    and c.payload[4] == 0x42):
+                pl = bytearray(c.payload)
+                pl[86] = bus
+                ch[i] = _clone(c, bytes(pl))
     out2 = seal(ch, head)
     # `normalize_counters` 不幂等：第一遍新块仍是 >=250<<16 的占位值，进不了
     # 「20..199 批次重编号」分支，所以必须跑两遍（与 `add_audio_track` 一致）。
-    return link_strip_envs(normalize_counters(normalize_counters(out2)))
+    res = link_strip_envs(normalize_counters(normalize_counters(out2)))
+    # 计数器还原必须放在 `normalize_counters` **之后**：它自己也会写这几处。
+    if keep_ctr is not None:
+        b = bytearray(res)
+        for c in chunks(b):
+            if c.tag == "gnoS" and len(c.payload) >= 924:
+                base = c.pos + 36
+                b[base + 210:base + 212] = keep_ctr[0]
+                b[base + 214:base + 216] = keep_ctr[1]
+                b[base + 923:base + 924] = keep_ctr[2]
+                break
+        res = bytes(b)
+    return res
 
 
 def _stack_donor(kind="summing"):
