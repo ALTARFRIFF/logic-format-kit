@@ -3638,3 +3638,75 @@ replace  STACK[414:415] qeSM 305                      -> FOLD[414:415] qeSM 307 
 
 素材已全部就位（`templates/donors/`）：`folder_strip.bin`、`folder_cover.bin`、
 `folder_qesm307.bin`、`folder_ncua.bin`（均为 **24 字节头 + 块**，可直接 `project.chunks()` 解析）。
+
+## §44 · Folder Stack 纯离线新建 —— ✅ 已打通（Logic 实测）
+
+与 Summing 走**同一条** `add_stack()` 配方，差别只在四处，外加两个**收尾动作**（这两个是
+本节的真正收获，前面所有失败都源于缺它们）。
+
+### 44.1 与 Summing 的四处差异
+
+| 项 | Summing | Folder |
+|---|---|---|
+| aux 三块 `OCuA:237`+`UCuA:303`+`UCuA:348` | **顶替**一格空行头 | **删掉**（不是还原） |
+| 通道条覆盖块 | `UCuA:303` | **`UCuA:350`** |
+| `nCuA` | 不变 | **+4**（1224 → 1228）|
+| 尾 `qeSM:305` | 不动 | **→ `qeSM:307`**，且指的是「紧接 `karT:58` 行组之前那一条」，不是最后一个 |
+
+另有三处 `kind` 判别：`ivnE:469` 的 `+155` 必须是 `0x14`；Stack 主行 `karT:58` 的 `payload[2]`
+必须是 `0x01`；`01` 行要排在紧前的前一个 `00` 行**之前**。这三条原先写成 `if kind ==
+"summing"`，正是它们把 Folder 整个挡在门外的根因。
+
+### 44.2 ⑦ 行组边界：真值在 421–426 是**连续 6 个** `karT:58`
+
+`_F-FOLDER` 的尾部结构：
+
+```
+421..426  karT:58 × 6      ← 连续
+427       karT:0
+428       qSvE:256
+429       qeSM:315
+430       karT:0
+431       qSvE:16
+432       qeSM:313
+433       karT:58 × 1      ← 只有 `14/23`
+434       karT:0
+```
+
+把 `14/23` 挪到末尾时，`00/21` 会被一起带到末段。必须把末段第一个行块挪回
+`qSvE:256` 之前那个 `karT:0` 的前面。**修之前块数对但 `(tag,length)` 序列在索引 426 分叉。**
+
+### 44.3 ⑧ 重跑两遍 `normalize_counters` + `link_strip_envs`（决定性）
+
+删掉 aux 三块会让 `OCuA:201` 的行号整体前移一位，而 `normalize_counters()` 在这一步
+**已经跑过了**。结果是 315 个块各有 1–3 字节偏差、共 626 字节 —— 文件打不开。
+
+末尾补上：
+
+```python
+return link_strip_envs(normalize_counters(normalize_counters(rebuild(sc, head))))
+```
+
+差异立刻降到 **46 块 / 350 字节**（比 Summing 的 49 块 / 440 字节还干净），文件能打开。
+两遍是必需的（该函数不幂等）。
+
+### 44.4 Logic 实测验收（与手工参考逐字段相同）
+
+```
+properties : _S-BASE → 132,502 B / 452 块 = _F-FOLDER（(tag,length) 逐块一致）
+list_tracks: is_stack: true, expanded: false
+             partial_evidence: "collapsed track stack(s) 1 “Sub 1” hide their subtracks"
+track_info : kind: "reduced", kind_evidence: ["no Output slot"], child_count: 9,
+             volume_db: 0, mute: false, solo: false, automation_mode: "Read",
+             inserts: [], sends: [], output: null
+```
+
+`_F-FOLDER`（用手做的）读回**完全相同的每一项**。
+
+### 44.5 附带修掉的一个模块级 bug
+
+`project.py` 的 `if __name__ == "__main__":` 原来在 **699 行**，而 `add_stack()` 定义在
+**1247 行** —— 所以 `python3 -m logicfmt.project selftest` 跑不到后面定义的函数
+（`NameError: name 'add_stack' is not defined`）。已把守卫移到文件末尾。
+`project` 自检从 28 条增加到 **31 条**（新增 summing/folder 生成等长等块 + Folder 主通道
+`+155 == 0x14`）。

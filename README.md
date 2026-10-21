@@ -36,7 +36,7 @@ Logic Pro 的文件格式没有公开文档。想批量做 77 条通道条预设
 | 从零新建一条音频轨（**运行时**） | ✅ **可用** | Logic 自己建，其余全部离线改，见 `docs/07` |
 | 从零新建一条音频轨（纯离线） | ✅ **Logic 实测通过** | `project.add_audio_track()`；`_Y5`（2 轨→3 轨）、`_Y6`（3 轨→4 轨）轨道行与混音器通道条均正确；见 `docs/07` |
 | 从零新建 Summing Stack | ✅ **已打通**（纯离线） | `add_stack(kind="summing")`：`_S-BASE` → 132,596 B / 452 块，与用户亲手做的 `_S-STACK` 字节数、块数、`(tag,length)` 序列全等；Logic 读回 `output: "Monitor Bus"`、`strip_count: 4`、`logic_set_track_stack` 能折叠（`hidden_tracks: [Audio 1]`）。最后一环是**同一个 UUID 写三处**：子轨条 `+205` / aux 条 `+221` / **名字为 `Bus N` 的那条 `OCuA:201` 的 `+153`**（详见 findings §43） |
-| 从零新建 Folder Stack | 🟡 **配方已完整，未实现** | 与 Summing 差三处：条覆盖块用单个 `UCuA:350`、`nCuA` +4、尾 `qeSM:305`→`307`；`+155=0x14` |
+| 从零新建 Folder Stack | ✅ **实测** | `add_stack(kind="folder")`：`_S-BASE` → 132,502 B / 452 块，与手工 `_F-FOLDER` 的 `(tag,length)` 序列逐块一致；Logic 读回 `is_stack: true`、`kind: "reduced"`、`child_count: 9`、无 output 槽，与手工参考**逐字段相同**。收尾必须重跑两遍 `normalize_counters` + `link_strip_envs` |
 | 真插入（真让文件变长） | ✅ **已验证** | `insert_in_payload` + `seal`，往 `qSvE` 插记录实测通过 |
 | **BPM 变化（任意小节）** | ✅ 实测通过（`logicfmt/tempo.py`） | 位置 = tick+38400，值 = BPM×10000 |
 | Marker 位置 / 移动 | ✅ **已验证**（`qSvE` 内 48 字节记录，位置在记录 `+5`）｜新增 🟡 记录数与名字数都参与计数、同时加仍不增（20+ 个单变量实验已归档） | `logicfmt/markers.py` |

@@ -568,6 +568,36 @@ def _selftest_stacks():
     else:
         bad += 1
         print("FAIL folder flag readback")
+    # 纯离线新建 Stack：与用户亲手做的参考文件等长等块
+    root2 = next((c for c in cands
+                  if os.path.exists(os.path.join(c, "_S-BASE.logicx"))), root)
+    base_p = os.path.join(root2, "_S-BASE.logicx", "Alternatives/000/ProjectData")
+    ref_s = os.path.join(root2, "_S-STACK.logicx", "Alternatives/000/ProjectData")
+    ref_f = os.path.join(root2, "_F-FOLDER.logicx", "Alternatives/000/ProjectData")
+    if os.path.exists(base_p) and os.path.exists(ref_s) and os.path.exists(ref_f):
+        b = open(base_p, "rb").read()
+        for kind, ref, want_bytes, want_blocks in (
+                ("summing", ref_s, 132596, 452), ("folder", ref_f, 132502, 452)):
+            out = add_stack(b, kind=kind, name="X 1")
+            r = open(ref, "rb").read()
+            sig_o = [(c.tag, c.length) for c in chunks(out)]
+            sig_r = [(c.tag, c.length) for c in chunks(r)]
+            if len(out) == want_bytes and len(sig_o) == want_blocks and sig_o == sig_r:
+                ok += 1
+            else:
+                bad += 1
+                print(f"FAIL add_stack({kind}): {len(out)}B/{len(sig_o)}blk "
+                      f"(want {want_bytes}B/{want_blocks}blk, sig equal={sig_o == sig_r})")
+        # Folder 主行的通道对象必须是 +155 = 0x14
+        fo = add_stack(b, kind="folder", name="X 1")
+        kinds = {c.payload[155] for c in chunks(fo) if c.tag == "ivnE" and c.length == 469}
+        if 0x14 in kinds:
+            ok += 1
+        else:
+            bad += 1
+            print(f"FAIL folder main is not ivnE+155=0x14 (saw {sorted(kinds)})")
+    else:
+        print("stack selftest: generation references missing, 3 checks skipped")
     print(f"stack selftest: {ok} passed, {bad} failed")
     return ok, bad
 
@@ -665,9 +695,6 @@ def _selftest_insert():
     print(f"insert selftest: {ok} passed, {bad} failed")
     return ok, bad
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())
 
 
 # ===== 新增一条音频轨 ======================================================
@@ -1226,7 +1253,21 @@ def _folderify(res, base_data):
             t2 = [i for i in rows2 if sc[i].payload[2] == 0x00
                   and int.from_bytes(sc[i].payload[8:12], "little") == 0][-1]
             sc.insert(t2, item)
-    return rebuild(sc, head)
+    # ⑦ 行组边界：真值 `_F-FOLDER` 在 421–426 是**连续的 6 个** `karT:58`，
+    #    而末段（`qeSM:313` 之后、末尾 `karT:0` 之前）只有 1 个（`14/23`）。
+    #    上一级代码把 `14/23` 挪到末尾时，`00/21` 也被带到了末段，这里把它挪回
+    #    `qSvE:256` 之前那段行组的尾部。
+    q = next((i for i, c in enumerate(sc) if c.tag == "qSvE" and c.length == 256), None)
+    if q is not None and sc[q - 1].tag == "karT" and sc[q - 1].length == 0:
+        seg = [i for i in range(q, len(sc))
+               if sc[i].tag == "karT" and sc[i].length == 58]
+        if len(seg) >= 2:
+            item = sc.pop(seg[0])
+            q2 = next(i for i, c in enumerate(sc) if c.tag == "qSvE" and c.length == 256)
+            sc.insert(q2 - 1, item)
+    # ⑧ 块的位置定下来之后必须**重跑一遍计数器**：删掉 aux 三块让 `OCuA:201` 的行号
+    #    整体前移，不重算会留下 266 个块的 1–3 字节偏差（实测 315 块/626B → 46 块/350B）。
+    return link_strip_envs(normalize_counters(normalize_counters(rebuild(sc, head))))
 
 
 def add_stack(data, kind="summing", name=None, rnd=None):
@@ -1245,19 +1286,23 @@ def add_stack(data, kind="summing", name=None, rnd=None):
 
     参数 `data` 是完整 ProjectData；返回完整字节。
 
-    验收（`_S-BASE` 1 轨 → `_TG12`，132,596 字节 = 参考 `_S-STACK`，Logic 实测）：
-    轨道行出现且名为 `Sum 1`，通道条读回 `kind: "audio"`、`child_count: 20`、
-    `output: "Stereo Output"`、`volume_db: 0`、`pan: "0"` —— 与用户亲手做的
-    `_S-STACK` 逐项一致。**尚未成立的一点**：`logic_set_track_stack` 仍报
-    「no track stack disclosure arrow」，即 Logic 还不把它当 Stack 呈现；
-    **已知限制（未通过验收，勿当完成品用）**：`add_stack` 产出的文件在结构上与真值
-    `_S-STACK` 一致（尺寸/块数/签名序列/`karT:58` 行序/通道条字段全部相同），Logic 也能
-    正确显示 `Sum 1` 在 `Audio 1` 之上、混音器 4 条与真值一致；但**子轨的 output 仍解析成
-    `Stereo Output`，而不是指向新 Stack 的 bus**，因此 Logic 还不把它当真正的 Summing Stack。
-    已试过并排除：条 `+189`/`+221`、行头 `+153` 三处 roster UUID；既有通道对象 id 让位；
-    新通道对象的 uid 与 id。详见 `_templates/PROJECTDATA-FINDINGS.md` §A-13～A-19。
+    验收（都是 **Logic 实测**，不是只比字节）：
 
-    最可能是「还没有子轨」（参考样本有 2 条），需要把子轨 output 指到它的 bus 才算完整。
+    *Summing* —— `_S-BASE`(1 轨) → 132,596 字节 = 参考 `_S-STACK`，`logic_list_tracks`
+    读回 `Sum 1` 在 `Audio 1` **之上**，`logic_list_strips` 读回
+    `Sum 1 / Audio1 / St Out / Master`（`strip_count 4`）；子轨 `Audio 1` 的
+    `output` 指向新 Stack 的 bus（`Monitor Bus`）。三处 UUID 身份链：条 `+205` /
+    条 `+221` / `Bus N` 行 `+153` 写同一个 UUID。
+
+    *Folder* —— `_S-BASE` → 132,502 字节 = 参考 `_F-FOLDER`，452 块、
+    `(tag,length)` 序列逐块一致；Logic 读回 `is_stack: true`、`expanded: false`、
+    **`kind: "reduced"`**（`kind_evidence: ["no Output slot"]`）、`child_count: 9`、
+    `volume_db: 0`、`automation_mode: "Read"`、无 insert / 无 send —— 与用户亲手做的
+    `_F-FOLDER` 读回**逐字段相同**；且 `logic_list_tracks` 会报
+    「collapsed track stack(s) 1 “Sub 1” hide their subtracks」。
+
+    两个收尾动作是必需的（少一个打不开或差 266 块）：`_folderify()` 末尾的
+    **⑦ 行组边界**与 **⑧ 重跑两遍 `normalize_counters` + `link_strip_envs`**。
     """
     kind = (kind or "summing").lower()
     if kind not in ("summing", "folder"):
@@ -1588,3 +1633,5 @@ def P_tag_payload(tag: str, payload: bytes):
     _s.pack_into("<I", h, 20, 0xFFFFFFFF)
     _s.pack_into("<I", h, 28, len(payload))
     return h + payload
+if __name__ == "__main__":
+    raise SystemExit(main())
