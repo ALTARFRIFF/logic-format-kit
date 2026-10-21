@@ -26,6 +26,8 @@
 import struct
 
 MAGIC = 0x90
+import os
+
 TAIL_SIG = b"\xf1\x00\x00\x00\xff\xff\xff\x3f"
 TAIL_SIZE = 16
 POS_ORIGIN = 38400
@@ -293,3 +295,92 @@ def append_cc(payload, number, value, tick):
 
 if __name__ == "__main__":
     _selftest()
+
+
+# ---------------------------------------------------------------- 新建区域（donor 法）
+REG_REC = 40
+REG_POS_ORIGIN = 34560
+REG_POS_SCALE = 256
+_DONOR_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates", "donors")
+
+
+def _donor(name):
+    with open(os.path.join(_DONOR_DIR, name), "rb") as f:
+        return f.read()
+
+
+def _registry_index(ch):
+    hits = []
+    for i, c in enumerate(ch):
+        p = c.payload
+        if c.tag != "qSvE" or len(p) < 96:
+            continue
+        if (len(p) - TAIL_SIZE) % REG_REC or p[-TAIL_SIZE:-TAIL_SIZE + 8] != TAIL_SIG:
+            continue
+        n = (len(p) - TAIL_SIZE) // REG_REC
+        if n % 2:
+            continue
+        if all(p[k * REG_REC] == 0x20 for k in range(0, n, 2)) and all(
+                p[k * REG_REC] == 0 and p[k * REG_REC + 14:k * REG_REC + 16] == b"\x06\x8a"
+                for k in range(1, n, 2)) and p[(n - 2) * REG_REC + 14:(n - 2) * REG_REC + 16] == b"\x20\x81":
+            hits.append(i)
+    if len(hits) != 1:
+        raise ValueError("区域注册表候选数 %d，应为 1：%r" % (len(hits), hits))
+    return hits[0]
+
+
+def add_region(data, *, tick=0, length=3840, name=None):
+    """在已有区域的工作区上新增一个 MIDI 区域。
+
+    三块对象与登记表的一对记录都**整块取自 donor**（Logic 自己写的），
+    代码只改写位置、长度、名字 —— 不碰任何序号。
+    """
+    from . import project as P
+    ch = list(P.chunks(data))
+    head = P.header(data)
+
+    # 1) 登记表：克隆最后一对，只改位置，标记搬到新的一条
+    ri = _registry_index(ch)
+    p = bytearray(ch[ri].payload)
+    n = (len(p) - TAIL_SIZE) // REG_REC
+    last = (n - 2) * REG_REC
+    pair = bytearray(_donor("region_regpair.bin"))
+    struct.pack_into("<I", pair, 5, (tick + REG_POS_ORIGIN) // REG_POS_SCALE)
+    _k0 = len([c for c in ch if c.tag == "qeSM" and c.length == 303]) - 5
+    if _k0 > 0:
+        struct.pack_into("<I", pair, 32, struct.unpack_from("<I", pair, 32)[0] + 4 * _k0)
+    struct.pack_into("<H", p, last + 14, 0)
+    ch[ri] = P.with_payload(ch[ri], bytes(p[:len(p) - TAIL_SIZE]) + bytes(pair) + bytes(p[len(p) - TAIL_SIZE:]))
+
+    # 2) 三块：整块取自 donor，只改长度/起点/名字
+    tri = _donor("region_triple.bin")
+    robj = P.Chunk(pos=0, tag="qeSM", length=int.from_bytes(tri[28:32], "little"), raw=tri[:36 + int.from_bytes(tri[28:32], "little")])
+    o = 36 + int.from_bytes(tri[28:32], "little")
+    krow = P.Chunk(pos=0, tag="karT", length=0, raw=tri[o:o + 36])
+    o2 = o + 36
+    cont = P.Chunk(pos=0, tag="qSvE", length=int.from_bytes(tri[o2 + 28:o2 + 32], "little"), raw=tri[o2:])
+
+    rp = bytearray(robj.payload)
+    nm = (name or "Region").encode("utf-8")
+    rp[16] = len(nm)
+    rp[17] = 0
+    rp[18:18 + len(nm)] = nm
+    struct.pack_into("<I", rp, 83, length * 256)
+    rp[85] = (length // 256) & 0xFF
+    struct.pack_into("<I", rp, 247, tick * 256)
+    robj = P.with_payload(robj, bytes(rp))
+
+    # donor 自带一套序号；同文件第二次起整体后移，否则两个对象撞号会被丢弃
+    k = len([c for c in ch if c.tag == "qeSM" and c.length == 303]) - 5
+    if k > 0:
+        def _bump(c, dblk, dpay, pay_off=()):
+            r = bytearray(c.raw)
+            struct.pack_into("<I", r, 8, ((struct.unpack_from("<I", r, 8)[0] >> 16) + dblk) << 16)
+            for off in pay_off:
+                struct.pack_into("<I", r, 36 + off, struct.unpack_from("<I", r, 36 + off)[0] + dpay)
+            return P.Chunk(pos=0, tag=c.tag, length=c.length, raw=bytes(r))
+        robj = _bump(robj, 4 * k, k, (8, 196))
+        krow = _bump(krow, 4 * k, 0)
+        cont = _bump(cont, 4 * k, 0, (12,))
+    at = [i for i, c in enumerate(ch) if c.tag == "qSvE" and c.length == 80][-1] + 1
+    return P.seal(ch[:at] + [robj, krow, cont] + ch[at:], head)
