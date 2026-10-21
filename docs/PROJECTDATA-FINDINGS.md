@@ -3524,3 +3524,57 @@ bus 的身份由**位置**决定（第 N 条 aux 就是第 N 条 bus）。所以
 
 **下一步**：先修 `+86`（应该是 1 行，把 `_shift_env_ids` 真正透传），再对 `+227..232` 做单变量实验。
 `+227..232` 才是「这条 aux 属于哪个 Stack」的真正落点候选 —— 因为它不在 Audio 1 条上，只在 aux 条上。
+
+## §43 · 新建 Summing Stack：**已打通**（三处 UUID 身份链是最后一环）
+
+### 结论
+`add_stack(kind="summing")` 现在产出**可打开、可折叠、output 正确**的 Stack。
+端到端验收：`_S-BASE`(130,551/444) → `add_stack()` → `_S-GEN20`(132,596/452)，
+与用户亲手做的 `_S-STACK` **字节数、块数、`(tag,length)` 序列全等**。
+
+Logic 读回（三重见证）：
+
+| 见证 | 结果 |
+|---|---|
+| `logic_track_info("Audio 1")` | `output: "Monitor Bus"` ← 真值 |
+| `logic_list_strips` | `strip_count: 4` = Sum 1 / Audio1 / St Out / Master ← 与真值同 |
+| `logic_set_track_stack("Sum 1", expanded=False)` | `state: "collapsed"`，`hidden_tracks: [Audio 1]` |
+
+第三项是关键：此前一直报「exposes no track stack disclosure arrow; it is not a track
+stack」，现在三角**存在并且能折**，说明 Logic 真的把它当 Stack 了。
+
+### 最后一环：同一个 UUID 写进三处
+`_S-STACK` 里 aux 的 UUID 恰好出现 **3 次**，三处必须写成同一个值：
+
+| 块 | 位置 | 含义 |
+|---|---|---|
+| 子轨条 `OCuA:237`（`payload[4]==0x40`） | 载荷 **`+205`** | 子轨的输出目标 |
+| 辅助条 `OCuA:237`（`payload[4]==0x42`） | 载荷 **`+221`** | bus 接收者身份（aux 自身） |
+| **`OCuA:201` 中名字恰为 `Bus <aux.载荷[86]>` 的那一条** | 载荷 **`+153`** | 这条 bus 的对象身份 |
+
+**第三处最容易写错**：早前代码取的是「最后一条 `OCuA:201`」（`rows201[-1]`），
+而真正的落点是**按名字匹配 `Bus N`**。取错位置的现象非常具体：
+
+- 只写前两处 → `output` 读成 **`No Output`**（`+92=2` 指向的 bus 找不到接收者）
+- 三处都不写 → `output` 读成 **`Stereo Output`**（完全忽略 `+92`）
+- 三处都写对 → `output` 读成 **`Monitor Bus`** ✅
+
+### 顺带纠正两个长期误判
+1. **aux 里没有「我在接收哪条 bus」这个字段**。`_BUS-OUT1`(→Bus1) 与 `_BUS-OUT2`(→Bus2)
+   两个 118,240 B / 444 块的文件，除 UUID 外**整个文件只有 1 字节不同**：Audio 1 条的 `+92`
+   （`02` vs `03`），aux 那一条的所有字段逐字节相同。**bus 是位置寻址的**，靠上面那三处
+   UUID 身份链解析。前几轮一直在 aux 里找一个不存在的字段。
+2. **`ivnE` 的 `+86 = 0x42` 不是 bug**。`_S-BASE` 里既有通道对象本来就是 `0x42`；
+   `_S-STACK` 里变成 `0x40` 是 Logic 保存时自己的归一化，作者不必复刻。
+
+### Folder Stack：配方已完整，未实现
+`_F-BASE`(130,551/444) → `_F-FOLDER`(132,502/452) 的增量与 Summing 同形，只差三处：
+
+| 项 | Summing | Folder |
+|---|---|---|
+| 条覆盖块 | `UCuA:303` + `UCuA:348` 两块 | **单个 `UCuA:350`** |
+| `nCuA` | 不变（还原） | **+4**（1224 → 1228） |
+| 尾 `qeSM` | 新增 `qeSM:309` | **`qeSM:305` → `qeSM:307`**（+2，不是新增） |
+| 通道对象 | `ivnE:469`，`+155=0x10` | `ivnE:469`，**`+155=0x14`** |
+
+`templates/donors/stack_folder.bin` 已在库里，可直接取 `+155=0x14` 的 `ivnE:469`。

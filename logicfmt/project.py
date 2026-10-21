@@ -1440,11 +1440,21 @@ def add_stack(data, kind="summing", name=None, rnd=None):
                  and len(c.payload) > 4 and c.payload[4] == 0x42]
         plains = [(i, c) for i, c in enumerate(ch) if c.tag == "OCuA" and c.length == 237
                   and len(c.payload) > 221 and c.payload[4] == 0x40]
-        rows201 = [(i, c) for i, c in enumerate(ch) if c.tag == "OCuA" and c.length == 201
-                   and len(c.payload) > 169 and c.payload[4] == 0x42 and c.payload[6] == 0x00]
-        if auxes and plains and rows201:
+        # 第三处**不能取「最后一条 `OCuA:201`」**：真正的落点是名字恰好等于
+        # `Bus <该 aux 的 +86 值>` 的那一条 —— 它是这条 bus 的接收者身份。取错了
+        # 位置时 Logic 会把子轨的 output 读成 `No Output`（0x92 指向的 bus 找不到接收者）。
+        bus_name = None
+        if auxes:
+            bus_name = ("Bus %d" % auxes[-1][1].payload[86]).encode()
+        bus_row = None
+        for i, c in enumerate(ch):
+            if c.tag == "OCuA" and c.length == 201 and len(c.payload) >= 169:
+                if bus_name and c.payload[61:77].split(b"\0")[0] == bus_name:
+                    bus_row = i
+                    break
+        if auxes and plains and bus_row is not None:
             roster = int(uuid.uuid1().int).to_bytes(16, "big")
-            for idx, off in ((auxes[-1][0], 221), (plains[0][0], 205), (rows201[-1][0], 153)):
+            for idx, off in ((auxes[-1][0], 221), (plains[0][0], 205), (bus_row, 153)):
                 c = ch[idx]
                 pl = bytearray(c.payload)
                 pl[off:off + 16] = roster
