@@ -39,7 +39,8 @@ This kit decodes those formats far enough to read and write them directly, and �
 | Real insertion (grow the file) | ✅ **verified** | `insert_in_payload` + `seal`, tested on a `qSvE` record |
 | Markers | ✅ move/rename verified · 🟡 create offline unresolved | `logicfmt/markers.py`; create via the runtime tool |
 | MIDI notes (add / edit inside a region) | ✅ **verified in Logic** | `logicfmt/midi.py`: 32-byte records in a `qSvE` container |
-| MIDI controllers (CC64 sustain / CC11 expression) | 🟡 record located (`0xb0`, 48 bytes, `+12` = CC number), not written | value field is a normalised 32-bit quantity |
+| MIDI controller values (CC64 sustain / CC11 / CC1) | ✅ **verified in Logic** | `0xb0`, 48-byte record: `+11` value, `+12` number |
+| Add a MIDI controller event | 🟡 refused while the container mixes note records | — |
 | Create a MIDI region itself | 🟡 needs region object + track row + registry | same weight as creating a track |
 | Generate a `.logicx` from nothing | ❌ not recommended | template + edit |
 | Insert/delete fixed-size records | ❌ not implemented | use template slots |

@@ -191,8 +191,105 @@ def _selftest():
         append_note(bytes(p)[:-16] + bytes(REC32) + TAIL_SIG + b"\x00" * 8, 60, 90, 0)
     except NotImplementedError:
         ok += 1
+    # --- CC ---
+    c = bytearray()
+    for num, val, pos in ((64, 0, 0), (64, 127, 960), (11, 90, 1920)):
+        r = bytearray(CC_REC)
+        r[0] = CC_MAGIC
+        struct.pack_into("<I", r, OFF_POS, pos + POS_ORIGIN)
+        r[OFF_CC_VAL] = val
+        r[OFF_CC_NUM] = num
+        c += r
+    c += TAIL_SIG + b"\x00" * 8
+    assert all_cc_container(bytes(c)); ok += 1
+    assert not all_cc_container(bytes(p)); ok += 1
+    rows = read_ccs(bytes(c))
+    assert [r["number"] for r in rows] == [64, 64, 11]; ok += 1
+    assert [r["value"] for r in rows] == [0, 127, 90]; ok += 1
+    set_cc(c, 0, value=100)
+    assert c[OFF_CC_VAL] == 100; ok += 1
+    set_cc(c, 0, number=1, tick=3840)
+    assert c[OFF_CC_NUM] == 1 and _u32(c, OFF_POS) - POS_ORIGIN == 3840; ok += 1
+    d = append_cc(bytes(c), 64, 64, 2880)
+    assert len(d) == len(c) + CC_REC and len(read_ccs(d)) == 4; ok += 1
+    try:
+        append_cc(bytes(p), 64, 64, 0)
+    except NotImplementedError:
+        ok += 1
     print("%d passed, 0 failed" % ok)
 
+
+# 入口守卫放到文件末尾（CC 常量在后面定义）
+
+
+# ---------------------------------------------------------------------------
+# 控制器（CC）事件：记录以 0xb0 开头，采样长度为 48 字节
+# ---------------------------------------------------------------------------
+CC_MAGIC = 0xB0
+CC_REC = 48
+OFF_CC_NUM = 12
+OFF_CC_VAL = 11
+
+
+def cc_offsets(payload):
+    """容器里所有控制器记录的偏移（0xb0 + CC 号在 0..127）。"""
+    out = []
+    for o in range(0, len(payload) - 16):
+        if payload[o] == CC_MAGIC and payload[o + OFF_CC_NUM] <= 127:
+            out.append(o)
+    return out
+
+
+def read_ccs(payload):
+    rows = []
+    for o in cc_offsets(payload):
+        rows.append({
+            "offset": o,
+            "tick": _u32(payload, o + OFF_POS) - POS_ORIGIN,
+            "number": payload[o + OFF_CC_NUM],
+            "value": payload[o + OFF_CC_VAL],
+        })
+    return rows
+
+
+def set_cc(payload, offset, *, value=None, number=None, tick=None):
+    if payload[offset] != CC_MAGIC:
+        raise ValueError("偏移 %d 不是控制器记录" % offset)
+    if value is not None:
+        if not 0 <= value <= 127:
+            raise ValueError("CC 值必须在 0..127")
+        payload[offset + OFF_CC_VAL] = value
+    if number is not None:
+        if not 0 <= number <= 127:
+            raise ValueError("CC 号必须在 0..127")
+        payload[offset + OFF_CC_NUM] = number
+    if tick is not None:
+        struct.pack_into("<I", payload, offset + OFF_POS, tick + POS_ORIGIN)
+    return payload
+
+
+def all_cc_container(payload):
+    """整个容器是否都是 48 字节的控制器记录（决定能否安全追加）。"""
+    try:
+        t = tail_offset(payload)
+    except ValueError:
+        return False
+    return t % CC_REC == 0 and len(cc_offsets(payload)) == t // CC_REC
+
+
+def append_cc(payload, number, value, tick):
+    """追加一个控制器事件；只在全是 48 字节 CC 记录的容器里允许。"""
+    if not all_cc_container(payload):
+        raise NotImplementedError(
+            "该容器里混着音符记录（步长不同），追加 CC 会破坏结构；"
+            "现在只支持就地改（set_cc）已有 CC 的数值")
+    donor = bytearray(payload[0:CC_REC])          # 以第一条为模板
+    donor[0] = CC_MAGIC
+    struct.pack_into("<I", donor, OFF_POS, tick + POS_ORIGIN)
+    donor[OFF_CC_VAL] = value
+    donor[OFF_CC_NUM] = number
+    t = tail_offset(payload)
+    return payload[:t] + bytes(donor) + payload[t:]
 
 if __name__ == "__main__":
     _selftest()
