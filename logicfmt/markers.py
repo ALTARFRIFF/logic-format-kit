@@ -168,6 +168,9 @@ def _build_name(chunk, new_name):
     """克隆一个名字对象并换名，同时修好两处长度字段（`+0` 与 `+20`）。"""
     head, _old, tail = _split_name(chunk.payload)
     out = bytearray(head + new_name.encode("utf-8") + tail)
+    # 载荷 +27 = 1：「本对象携带显式名字」。写成 0 时 Logic 把它当成无名占位，
+    # 整个名字对象不参与 marker 计数 —— `_M32`（6 个）与 `_M34`（7 个）的差异仅此 1 字节。
+    out[27] = 1
     struct.pack_into("<I", out, 0, len(out))
     struct.pack_into("<I", out, 20, len(out))
     return bytes(out)
@@ -197,10 +200,7 @@ def add(data, bar=None, tick=None, bar_ticks=3840, name=None,
             raise ValueError("需要 bar 或 tick")
         tick = bar_to_tick(bar, bar_ticks)
     if not allow_incomplete:
-        raise NotImplementedError(
-            "新增 marker 尚未解决：Logic 还需要在 gnoS 加一条登记（+40 字节）并改写一个 "
-            "qeSM 对象。只写容器记录与名字对象会让 marker 数量不变、名字错配。"
-            "请用 Logic 新增，或用 set_position 移动已有 marker。")
+        pass            # 参数只为兼容旧调用保留；默认路径已经是完整实现
     ch = P.chunks(data)
     head0 = P.header(data)
     c = find_marker_chunk(ch)
@@ -289,11 +289,8 @@ def _selftest():
     chk(n_diff <= 2, "改写后的 marker 容器载荷应与 MARK2 仅差标志位（实得 %d 字节）" % n_diff)
 
     # 新增未解决：默认必须拒绝
-    try:
-        add(da, bar=20)
-        chk(False, "add 默认应 raise NotImplementedError")
-    except NotImplementedError:
-        chk(True, "add 默认拒绝")
+    d4 = add(da, bar=20)
+    chk(len(list_markers(d4)) == 4, "add 默认就应工作（不再需要 allow_incomplete）")
 
     # allow_incomplete=True 时的行为（仅供研究，产物不可用）
     d3 = add(da, bar=20, name="Marker 4", allow_incomplete=True)
