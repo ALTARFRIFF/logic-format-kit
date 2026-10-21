@@ -38,7 +38,7 @@ Logic Pro 的文件格式没有公开文档。想批量做 77 条通道条预设
 | 从零新建 Stack / Aux | 🟡 **行已出现，Stack 语义未闭合** | 纯离线：`add_stack()` 能把新行建出来、通道条读到 `kind: audio`，但 Logic 仍不认它是 Stack（差 roster UUID 的第 4 个落点；三个已知落点写对仍会崩，见 `_templates/PROJECTDATA-FINDINGS.md` §38 / §38.1）；**运行时 `logic_duplicate_track()` 复制一条已有 Stack 是 ✅ 已实测** |
 | 真插入（真让文件变长） | ✅ **已验证** | `insert_in_payload` + `seal`，往 `qSvE` 插记录实测通过 |
 | **BPM 变化（任意小节）** | ✅ 实测通过（`logicfmt/tempo.py`） | 位置 = tick+38400，值 = BPM×10000 |
-| Marker 位置 / 移动 | ✅ **已验证**（`qSvE` 内 48 字节记录，位置在记录 `+5`）｜新增 🟡 差一层 `gnoS` 登记 | `logicfmt/markers.py` |
+| Marker 位置 / 移动 | ✅ **已验证**（`qSvE` 内 48 字节记录，位置在记录 `+5`）｜新增 🟡 记录数与名字数都参与计数、同时加仍不增（20+ 个单变量实验已归档） | `logicfmt/markers.py` |
 | 自动化曲线（音量） | ✅ **已用 Logic 验收**（16 字节采样记录，值在 `+11`，位置在 `+4`）| `logicfmt/automation.py` |
 | MIDI 区域 | 🟡 容器已定位，字段未解 | — |
 | 从零生成 `.logicx` | ❌ 不推荐 | 模板 + 改写 |

@@ -37,7 +37,7 @@ This kit decodes those formats far enough to read and write them directly, and �
 | Create an audio track from scratch (**pure offline**) | 🟡 **recipe fully decoded, code not written** | 9 chunk deltas + the four `gnoS` insertions are measured, see `docs/07` |
 | Create a stack / aux from scratch | 🟡 membership writable, main-track objects not cracked | edit an existing one, or use the runtime |
 | Real insertion (grow the file) | ✅ **verified** | `insert_in_payload` + `seal`, tested on a `qSvE` record |
-| Markers / tempo changes / automation curves / MIDI regions | 🟡 containers located, fields not decoded | — |
+| Markers | ✅ move/rename verified · 🟡 create offline unresolved (record & name counts both gate, adding both still does not raise it) | `logicfmt/markers.py` |
 | Generate a `.logicx` from nothing | ❌ not recommended | template + edit |
 | Insert/delete fixed-size records | ❌ not implemented | use template slots |
 | Generate a `.logicx` from scratch | ❌ not recommended | template + rewrite |
