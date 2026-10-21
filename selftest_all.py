@@ -7,7 +7,7 @@ import importlib
 import sys
 
 MODULES = ["au_state", "project", "mixer", "chord", "meterkey", "tempo",
-           "markers", "classinfo", "waves"]
+           "markers", "automation", "classinfo", "waves"]
 
 
 def main():
@@ -20,8 +20,12 @@ def main():
             print("%-12s no _selftest" % name)
             continue
         try:
-            fn() if fn.__code__.co_argcount == 0 else fn(None)
-            print("%-12s ok" % name)
+            r = fn() if fn.__code__.co_argcount == 0 else fn(None)
+            if r is False:
+                failed.append((name, "返回 False"))
+                print("%-12s FAIL 返回 False" % name)
+            else:
+                print("%-12s ok" % name)
         except AssertionError as e:
             failed.append((name, str(e)))
             print("%-12s FAIL %s" % (name, e))
