@@ -1357,8 +1357,10 @@ def add_stack(data, kind="summing", name=None, rnd=None):
                 break
         if strip is not None:
             uid = ch[strip].payload[189:205]
+            want = ttl.encode()[:16]
             for i, c in enumerate(ch):
-                if c.tag == "ivnE" and c.length == 469 and c.payload[160:160 + 3] == b"Sum":
+                if (c.tag == "ivnE" and c.length == 469
+                        and c.payload[160:160 + len(want)] == want):
                     pl = bytearray(c.payload)
                     if len(pl) >= 469:
                         pl[453:469] = uid
@@ -1366,7 +1368,9 @@ def add_stack(data, kind="summing", name=None, rnd=None):
                     break
 
     out2 = seal(ch, head)
-    return normalize_counters(out2)
+    # `normalize_counters` 不幂等：第一遍新块仍是 >=250<<16 的占位值，进不了
+    # 「20..199 批次重编号」分支，所以必须跑两遍（与 `add_audio_track` 一致）。
+    return link_strip_envs(normalize_counters(normalize_counters(out2)))
 
 
 def _stack_donor(kind="summing"):

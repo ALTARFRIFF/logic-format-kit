@@ -3208,3 +3208,33 @@ _M1（7 条）: 0, 4, 8, c, 10, 14, 18, 18       ← 7 个名字，末尾两个�
 
 这与 `add_stack()` 现有实现基本吻合，剩余缺口是**通道条登记（roster UUID）**没有一起生成。
 下一步：把 `add_audio_track()` 里刚打通的那套「登记 UUID 连带复制」直接套到 `add_stack()` 上。
+
+### A-11 · 新建 Summing Stack：已产出与真值同构的文件，只差一条输入路由
+
+修好两处后（① 通道条↔通道对象的 UUID 配对不再按名字 `"Sum"` 字面匹配，改用实际标题；
+② `add_stack()` 末尾补上 `normalize_counters` **跑两遍** + `link_strip_envs`，与
+`add_audio_track` 一致 —— 该函数不幂等），从 `_S-BASE` 生成 `_S-GEN`：
+
+| 项 | `_S-STACK`（Logic 亲手） | `_S-GEN`（我生成） |
+|---|---|---|
+| 文件大小 | 132,596 | **132,596** ✅ |
+| 块数 | 452 | **452** ✅ |
+| (tag,length) 签名序列 | — | **逐块一致** ✅ |
+| 字节差异 | — | 507 字节 / 110 段，**几乎全是 UUID** |
+| 行出现 | `Audio 1` + `Sum 1` | `Audio 1` + `Sum 1` ✅ |
+| 新行的 `kind` | `audio`（有 Input 槽） | **`audio`** ✅ |
+
+**重要对照结果**：Summing Stack 主行的 `kind` 在参考文件里**也是 `audio`**（不是 `reduced`，
+也不发布 `is_stack`）。所以「`kind: audio`」不是失败信号 —— 这一点纠正了此前的判断。
+
+**唯一剩下的真差异**：
+
+```
+_S-STACK  Sum 1 的 input = "Monitor Bus"（= Bus 1）
+_S-GEN    Sum 1 的 input = null
+```
+
+参考文件里 `Audio 1` 的 output 正是 `Monitor Bus`，即子轨路由到该 bus、主行从该 bus 收 ——
+这是 Summing Stack 成立的实际标志。所以缺口收敛成一处：**给新 aux 条写入它的输入 bus**。
+
+文件里其余 505 字节差异全是新对象的 16 字节 UUID（新必然不同，不可对齐）。
