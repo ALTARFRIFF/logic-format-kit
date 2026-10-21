@@ -7,7 +7,7 @@ import importlib
 import sys
 
 MODULES = ["au_state", "project", "mixer", "chord", "meterkey", "tempo",
-           "markers", "automation", "classinfo", "waves"]
+           "markers", "automation", "classinfo", "waves", "midi"]
 
 
 def main():

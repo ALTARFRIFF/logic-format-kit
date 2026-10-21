@@ -196,6 +196,7 @@ python3 logicfmt/build_test_mk.py --dry-run
 | Aux / Stack 主轨 | `ivnE(467)`，`+155` = `05` Aux / `10` Summing / `14` Folder | ✅ 读、改类型、改名；🟡 离线新建（`add_stack()`，行可建、Stack 语义差 roster UUID）；运行时 `logic_duplicate_track()` ✅ |
 | Stack 成员关系 | Folder = 轨条 `+110`；Summing = 输出路由 | ✅ 读写 |
 | 真插入（文件变长） | `insert_in_payload` + `seal` | ✅ 已验证（往 qSvE 插记录） |
-| Marker / Tempo / 自动化 / MIDI 区域 | 已定位容器 | ❌ | 自动化轨是 `rpyH` |
+| Tempo / 自动化 / MIDI 音符 | ✅ 可写 | ✅ | MIDI 音符在区域的 `qSvE` 容器里 |
+| Marker 新增 | 🟡 读端上限未解 | — | 移动/改名已可 |
 | 插件参数 | ✅ | ✅ | 见 `docs/02`，98% 状态数 |
 | 任意插件参数（通用兜底） | ✅ | ✅ | L2 ClassInfo；Waves 走 `data` 记录表 |
