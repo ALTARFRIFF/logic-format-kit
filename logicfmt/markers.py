@@ -130,17 +130,65 @@ def set_position(data, index, bar=None, tick=None, bar_ticks=3840):
                              raw=(bytes(raw) if x is c else x.raw)) for x in ch], head)
 
 
-# ---------------------------------------------------------------- 写（真插入）
-def add(data, bar=None, tick=None, bar_ticks=3840, donor=None):
-    """在容器末尾追加一条 marker 记录（真插入 48 字节）。
+# ---------------------------------------------------------------- 名字对象（qSxT）
+NAME_TAG = "qSxT"
+NAME_MIN = 400            # 名字对象的载荷都在 400 字节以上（RTF 模板固定长度）
 
-    ⚠️ 实测未生效：Logic 读 marker 数量时似乎不只看这个容器的载荷长度 ——
-    往 `_TL-MARK` 追加一条后 Logic 仍只显示 3 个 marker（位置改写则完全正常）。
-    推测 marker 还有一层 Logic 自维护对象（`_TL-MARK` → `_TL-MARK2` 只移动
-    不增删也多出 6 个块）。**移动用 `set_position`，新增请用 Logic。**
 
-    模板取自已有记录（克隆除位置外的全部字节），所以不需要知道其余字段。
-    名字是独立对象，这里不创建 —— Logic 会给新 marker 一个默认名字。
+def _is_name_chunk(chunk):
+    return (chunk.tag == NAME_TAG and len(chunk.payload) > NAME_MIN
+            and b"{\\rtf1" in chunk.payload)
+
+
+def name_chunks(chunks):
+    """所有 marker 名字对象（`qSxT` 里带 RTF 的那些）。"""
+    return [c for c in chunks if _is_name_chunk(c)]
+
+
+def _split_name(payload):
+    """把名字对象拆成 (前段, 旧名字, 后段)。"""
+    i = payload.find(b"{\\rtf1")
+    if i < 0:
+        raise ValueError("名字对象里没有 RTF 头")
+    j = payload.rfind(b"\\cf2 ")
+    if j < 0 or j < i:
+        raise ValueError("名字对象里没有 \\cf2 标记")
+    j += 5
+    k = payload.find(b"}", j)
+    if k < 0:
+        raise ValueError("名字对象里没有收尾花括号")
+    return payload[:j], payload[j:k], payload[k:]
+
+
+def read_name(chunk):
+    return _split_name(chunk.payload)[1].decode("utf-8", "replace")
+
+
+def _build_name(chunk, new_name):
+    """克隆一个名字对象并换名，同时修好两处长度字段（`+0` 与 `+20`）。"""
+    head, _old, tail = _split_name(chunk.payload)
+    out = bytearray(head + new_name.encode("utf-8") + tail)
+    struct.pack_into("<I", out, 0, len(out))
+    struct.pack_into("<I", out, 20, len(out))
+    return bytes(out)
+
+
+def add(data, bar=None, tick=None, bar_ticks=3840, name=None,
+        allow_incomplete=False):
+    """新增一个 marker（记录 48 字节 + 一个名字对象），位置按小节排序。
+
+    ⚠️ **未解决，默认拒绝**（`allow_incomplete=True` 才会执行，且结果不可用）。
+
+    实测（`_TL-MARK2` 3 marker → `_H-MARK` 4 marker，Logic 自己加的）增量是：:
+
+        qSvE:160 -> qSvE:208      容器 +48 字节           ← 本函数能做
+        qSxT:483 +1               新的名字对象            ← 本函数能做
+        gnoS +40                  一条登记记录            ← 未解
+        qeSM:307 -1 / qeSM:305 +1 登记对象改写            ← 未解
+
+    只做前两项时 Logic 仍只显示 3 个 marker，而且第 3 个的名字被错配（Chorus 变成
+    新加的名字）—— 说明 marker 与名字之间有一层登记表，光加数据不登记反而更糟。
+    `gnoS` / `qeSM` 这两处过去多次证明「照抄即损坏或崩溃」，所以这里宁可拒绝。
     """
     if bar is not None and tick is not None:
         raise ValueError("bar 与 tick 只能给一个")
@@ -148,21 +196,57 @@ def add(data, bar=None, tick=None, bar_ticks=3840, donor=None):
         if bar is None:
             raise ValueError("需要 bar 或 tick")
         tick = bar_to_tick(bar, bar_ticks)
+    if not allow_incomplete:
+        raise NotImplementedError(
+            "新增 marker 尚未解决：Logic 还需要在 gnoS 加一条登记（+40 字节）并改写一个 "
+            "qeSM 对象。只写容器记录与名字对象会让 marker 数量不变、名字错配。"
+            "请用 Logic 新增，或用 set_position 移动已有 marker。")
     ch = P.chunks(data)
-    head = P.header(data)
+    head0 = P.header(data)
     c = find_marker_chunk(ch)
     if c is None:
         raise ValueError("这个工程没有 marker 容器")
+    names = name_chunks(ch)
+    if not names:
+        raise ValueError("这个工程里找不到 marker 名字对象（qSxT/RTF），无法新增")
+    donor_name = names[-1]
+    if name is None:
+        name = "Marker %d" % ((len(c.payload) - TAIL) // REC + 1)
+
+    # 1) 记录：按位置插入到正确位置
     n = (len(c.payload) - TAIL) // REC
-    # 以第一条记录为模板：除位置与序号缓存外原样克隆，避免自造未知字段
-    rec = bytearray(c.payload[0:REC] if donor is None else donor)
-    struct.pack_into("<I", rec, 5, tick_to_pos(tick))
-    rec[16] = ((n + 1) * 4) & 0xFF
-    cut = len(c.payload) - TAIL
-    out = P.insert_in_payload(P.Chunk(pos=c.pos, tag=c.tag, length=c.length,
-                                      raw=c.raw), cut, bytes(rec))
-    ch2 = [out if x is c else x for x in ch]
-    return P.seal(ch2, head)
+    recs = [bytes(c.payload[i * REC:(i + 1) * REC]) for i in range(n)]
+    positions = [struct.unpack_from("<I", r, 5)[0] for r in recs]
+    new_rec = bytearray(recs[-1])
+    struct.pack_into("<I", new_rec, 5, tick_to_pos(tick))
+    pos = tick_to_pos(tick)
+    ins = sum(1 for p in positions if p < pos)
+    if ins == n:
+        new_payload = c.payload[:-TAIL] + bytes(new_rec) + c.payload[-TAIL:]
+    else:
+        cut = ins * REC
+        new_payload = (c.payload[:cut] + bytes(new_rec)
+                       + c.payload[cut:-TAIL] + c.payload[-TAIL:])
+    # 序号缓存按最终顺序重写
+    pl = bytearray(new_payload)
+    for i in range((len(pl) - TAIL) // REC):
+        pl[i * REC + 16] = ((i + 1) * 4) & 0xFF
+    new_ctr = P.with_payload(P.Chunk(pos=c.pos, tag=c.tag, length=c.length, raw=c.raw),
+                             bytes(pl))
+
+    # 2) 名字对象：克隆最后一个，换名，紧跟其后插入
+    nm = P.with_payload(P.Chunk(pos=donor_name.pos, tag=donor_name.tag,
+                                length=donor_name.length, raw=donor_name.raw),
+                        _build_name(donor_name, name))
+    out = []
+    for x in ch:
+        if x is c:
+            out.append(new_ctr)
+        else:
+            out.append(x)
+        if x is donor_name:
+            out.append(nm)
+    return P.seal(out, head0)
 
 
 # ---------------------------------------------------------------- 自检
@@ -204,12 +288,22 @@ def _selftest():
     n_diff = sum(1 for x, y in zip(pa, pb) if x != y)
     chk(n_diff <= 2, "改写后的 marker 容器载荷应与 MARK2 仅差标志位（实得 %d 字节）" % n_diff)
 
-    # 真插入
-    d3 = add(da, bar=20)
-    chk(len(d3) == len(da) + REC, "add 应恰好增加 48 字节")
+    # 新增未解决：默认必须拒绝
+    try:
+        add(da, bar=20)
+        chk(False, "add 默认应 raise NotImplementedError")
+    except NotImplementedError:
+        chk(True, "add 默认拒绝")
+
+    # allow_incomplete=True 时的行为（仅供研究，产物不可用）
+    d3 = add(da, bar=20, name="Marker 4", allow_incomplete=True)
     chk(len(list_markers(d3)) == 4, "add 后有 4 个 marker")
-    chk(list_markers(d3)[3]["bar"] == 20, "新 marker 在第 20 小节")
-    chk(len(P.chunks(d3)) == len(P.chunks(da)), "add 不新增块")
+    chk([m["bar"] for m in list_markers(d3)] == [1, 5, 9, 20], "按小节排好序")
+    chk(len(P.chunks(d3)) == len(P.chunks(da)) + 1, "add 应新增 1 个块（名字对象）")
+    nm = name_chunks(P.chunks(d3))
+    chk(len(nm) == 4 and read_name(nm[-1]) == "Marker 4",
+        "新名字对象应读出 Marker 4，实得 %s" % ([read_name(x) for x in nm]))
+    chk(len(d3) > len(da), "文件应变长")
 
     print("markers: %d passed, %d failed" % (ok, bad))
     return bad == 0
