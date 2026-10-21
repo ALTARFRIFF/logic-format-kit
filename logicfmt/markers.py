@@ -311,3 +311,23 @@ def _selftest():
 if __name__ == "__main__":
     import sys
     sys.exit(0 if _selftest() else 1)
+
+
+# ---------------------------------------------------- donor 法新增 marker（实验）
+TAIL_SIG = b"\xf1\x00\x00\x00\xff\xff\xff\x3f"
+
+
+def _container_index(ch):
+    hits = []
+    for i, c in enumerate(ch):
+        p = c.payload
+        if c.tag != "qSvE" or len(p) < TAIL + REC or p[0] != REC_TYPE:
+            continue
+        if (len(p) - TAIL) % REC:
+            continue
+        if bytes(p[len(p) - TAIL:len(p) - TAIL + 8]) != TAIL_SIG:
+            continue
+        hits.append(i)
+    if len(hits) != 1:
+        raise ValueError("marker 容器候选数 %d：%r" % (len(hits), hits))
+    return hits[0]
