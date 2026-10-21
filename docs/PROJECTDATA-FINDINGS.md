@@ -3589,3 +3589,26 @@ stack」，现在三角**存在并且能折**，说明 Logic 真的把它当 Sta
 
 另有 `templates/donors/stack_folder.bin` 提供 `ivnE:469` + `+155 = 0x14` 的通道对象。
 **这五处就是 Folder 与 Summing 的全部差异**；Summing 路径（已验收可折叠）可直接复用其骨架。
+
+### §43.2 · Folder 相对 Summing 的全部差异：**只有 4 条 opcode**
+
+两个底座 `_S-BASE` 与 `_F-BASE` **块形状完全相同**（都是 444 块、130,551 B，`(tag,length)` 序列
+零差异），所以 `_S-STACK` 与 `_F-FOLDER`（都是 452 块）的逐块差就是 Folder 变换的全部：
+
+```
+replace  STACK[77:78]  nCuA 1224                     -> FOLD[77:78]  nCuA 1228        (+4)
+replace  STACK[86:89]  OCuA:237 + UCuA:303 + UCuA:348 -> FOLD[86:87]  OCuA:201         ← 条三块回退成空行头
+insert   STACK[355:355]  —                            -> FOLD[353:355] OCuA:237 + UCuA:350  ← 条+覆盖块搬到别处
+replace  STACK[414:415] qeSM 305                      -> FOLD[414:415] qeSM 307        (+2，内容也变)
+```
+
+四条的含义很关键，它说明 Folder **不是**「在 Summing 的三块位置上换换类型」：
+
+1. `nCuA` 要 +4（Summing 是把它还原）；
+2. **Summing 在 idx86 顶替掉的那格空行头，Folder 要还回去**（`OCuA:201` 原样保留）；
+3. Folder 的 `OCuA:237` + `UCuA:350` 落在**完全不同的位置**（约 idx353，音频条的覆盖块区域之后），
+   不是 idx86 —— 这一点早期文档记成「与 Summing 同位置、只换块类型」，是错的；
+4. 尾部既有 `qeSM:305` 变成 `qeSM:307`（不只是新增一条 309）。
+
+**这四条就是剩余的全部工作量**。三份 donor 已在 `templates/donors/`，
+`ivnE:469` 用 `templates/donors/stack_folder.bin`（`+155 = 0x14`）。
