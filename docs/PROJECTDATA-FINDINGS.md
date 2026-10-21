@@ -3612,3 +3612,29 @@ replace  STACK[414:415] qeSM 305                      -> FOLD[414:415] qeSM 307 
 
 **这四条就是剩余的全部工作量**。三份 donor 已在 `templates/donors/`，
 `ivnE:469` 用 `templates/donors/stack_folder.bin`（`+155 = 0x14`）。
+
+### §43.3 · Folder 的骨架已能 100% 复现，但差「身份链」
+
+按 §43.2 的四条 opcode 在 `add_stack(kind="summing")` 的输出上做变换，得到 `_F-GEN1`：
+
+```
+132,502 字节      = _F-FOLDER    ✅
+452 块            = _F-FOLDER    ✅
+(tag,length) 序列 逐块一致         ✅（只差 qeSM 305→307 一处，换上 donor 即消除）
+```
+
+**但文件打不开**（Logic 直接退出，`logic_list_windows` 报 `not_running`）。内容层面还有 52 块不同，
+其中 `gnoS`、`qeSM`、`qSvE` 的差异可以解释，**真正的原因是身份链没有接上**。
+
+关键发现：**Folder 的条 `OCuA:237`（`payload[4] = 0x46`）载荷里没有任何 v1 UUID**
+（逐字节扫过 0..len-16，`(b[6]&0xF0)==0x10 and (b[8]&0xC0)==0x80 and (b[9]&0xC0)==0x80` 零命中）。
+
+也就是说：**Summing 的「同一 UUID 写三处」那套不能直接套到 Folder 上** —— Folder 的
+文件夹身份不是时间型 UUID。早先 `_F-GEN2` 把 `strip.payload[221:237]`（其实是 16 个零）
+抄进子轨条 `+205` 和 `Bus 1` 行 `+153`，反而更糟。
+
+**下一步**：在 `_F-FOLDER` 里找 Folder 主条的真正身份字段（可能是一个 u16/序号而非 UUID，
+就像 `ivnE` 的 `+82` 那样），再接到子轨条与 `karT` 行上。
+
+素材已全部就位（`templates/donors/`）：`folder_strip.bin`、`folder_cover.bin`、
+`folder_qesm307.bin`、`folder_ncua.bin`（均为 **24 字节头 + 块**，可直接 `project.chunks()` 解析）。
