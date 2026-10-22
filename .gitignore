@@ -9,3 +9,6 @@ templates/*.bin
 
 # 参数表可用 tools/dump_all_maps.py 重新生成，不入库
 param-maps/*.txt
+
+# 探针工程（实验用，不入库）
+_probes/

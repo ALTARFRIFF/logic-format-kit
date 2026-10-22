@@ -47,6 +47,8 @@ This kit decodes those formats far enough to read and write them directly, and �
 | Create a MIDI region itself | ✅ **verified in Logic** | `midi.add_region()`: donor object + one 40-byte pair in the `qSvE` registry; `_MR14` read 5 regions |
 | Generate the `.logicx` chunk stream from nothing | ❌ not recommended | use the 5-file skeleton (`create_project()`) instead |
 
+> Continuing this work? Start with **[HANDOFF.md](HANDOFF.md)** (status, blockers, next experiments, environment traps).
+>
 > The three remaining gaps (create a marker, create a send, the `PvWr`/`FrAr` containers),
 > with their evidence and unlock conditions, are collected in [`docs/08-roadmap.md`](docs/08-roadmap.md).
 | Insert/delete fixed-size records | ❌ not implemented | use template slots |

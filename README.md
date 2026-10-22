@@ -50,6 +50,8 @@ Logic Pro 的文件格式没有公开文档。想批量做 77 条通道条预设
 | MIDI 区域本身（新建一个区域）| ✅ **Logic 实测通过** | `midi.add_region()`：donor 造区域对象 + 注册表 `qSvE` 追加一对 40 B 记录；`_MR14` 读出 5 个区域 |
 | 从零拼 `.logicx` 的字节流 | ❌ 不推荐 | 走 5 文件骨架（`create_project()`），不遍历构造块流 |
 
+> 接手/继续开发请先读 **[HANDOFF.md](HANDOFF.md)**（状态、卡点、下一步实验、环境陷阱）。
+>
 > 还没走通的三项（Marker 新增、新建 Send、`PvWr`/`FrAr` 容器）连同卡点与解开条件，
 > 集中写在 [`docs/08-roadmap.md`](docs/08-roadmap.md)。
 

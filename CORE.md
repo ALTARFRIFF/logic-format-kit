@@ -206,3 +206,5 @@ python3 logicfmt/build_test_mk.py --dry-run
 | 插件参数 | ✅ | ✅ | 见 `docs/02`，98% 状态数 |
 | `PvWr` / `FrAr` 未解容器 | ⚠️ 读得出 magic | ❌ 拒绝写（不盲探） | Polyverse / Slate；本机无样本、Logic 浏览器不列 Polyverse，见 `docs/02` §6 |
 | 任意插件参数（通用兜底） | ✅ | ✅ | L2 ClassInfo；Waves 走 `data` 记录表 |
+
+> 交接与未完成项的下一步：见 [HANDOFF.md](HANDOFF.md) 与 [docs/08-roadmap.md](docs/08-roadmap.md)。
