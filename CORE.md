@@ -202,7 +202,7 @@ python3 logicfmt/build_test_mk.py --dry-run
 | MIDI 区域新建 | ✅ | ✅ | `midi.add_region()`：donor 造区域对象 + `qSvE` 注册表追加一对 40B 记录；Logic 实测 `_MR14` 读出 5 个区域 |
 | MIDI 区域移动 | ✅ | ✅ | `midi.move_region()`：只改两处（对象 `+247` 的 tick×256、登记表记录 `+5` 的 `(tick+34560)/256`）；Logic 实测 `_MV-TEST` 读出 1/5/9/15/17 小节 |
 | MIDI 区域复制 | ✅ | ✅ | `midi.copy_region()`：走 donor 造对象 + 把音符容器整段换成源区域的；Logic 实测 `_CPY2` 读到 `COPY-A`，3 个音符 C3/E3/G3 vel 80 与源区域一致 |
-| Marker 新增 | 🟡 卡点=保存时 id 重编号 | — | 干净增量已拿到（`qSvE` 48B 记录 + 2×`qSxT` + gnoS 80B 登记行）；gnoS 那 80 字节已证伪（`S1` 去掉 gnoS 增量仍读出 1 个）；真卡点是 `qSvE` 对象 id 与保存后编号一致，缺一条 Logic 就静默丢弃；6 组对照见 `PROJECTDATA-FINDINGS` §50.8 |
+| Marker 新增 | 🟡 卡点=保存时 id 重编号（见 `docs/08-roadmap.md`） | — | 干净增量已拿到（`qSvE` 48B 记录 + 2×`qSxT` + gnoS 80B 登记行）；gnoS 那 80 字节已证伪（`S1` 去掉 gnoS 增量仍读出 1 个）；真卡点是 `qSvE` 对象 id 与保存后编号一致，缺一条 Logic 就静默丢弃；6 组对照见 `PROJECTDATA-FINDINGS` §50.8 |
 | 插件参数 | ✅ | ✅ | 见 `docs/02`，98% 状态数 |
 | `PvWr` / `FrAr` 未解容器 | ⚠️ 读得出 magic | ❌ 拒绝写（不盲探） | Polyverse / Slate；本机无样本、Logic 浏览器不列 Polyverse，见 `docs/02` §6 |
 | 任意插件参数（通用兜底） | ✅ | ✅ | L2 ClassInfo；Waves 走 `data` 记录表 |
