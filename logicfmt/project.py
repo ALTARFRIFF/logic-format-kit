@@ -290,6 +290,9 @@ def _selftest(paths: list[str] | None = None) -> int:
     rok, rbad = _selftest_remove()
     ok += rok
     bad += rbad
+    cok, cbad = _selftest_create()
+    ok += cok
+    bad += cbad
     print(f"{ok} passed, {bad} failed")
     return 0 if bad == 0 else 1
 
@@ -502,6 +505,17 @@ def _selftest_channels():
 OUT_OFF = 92          # 0 = Stereo Out, 0xFF = No Output, 否则 bus + 1
 FOLDER_FLAG_OFF = 110  # 0x01 = 该轨是某个 Folder Stack 的子轨
 STRIP_OUT = (201, 237, 241, 249)
+# 201 不是轨：它是**行头池**里的空行（每次保存固定 3 行，命名 = 下一条轨起的
+# 自增名 Audio N）。真轨的通道条是 237/241/249 那一组长度的 OCuA，
+# 后面紧跟两个 UCuA（见 audio_strip_runs / docs/PROJECTDATA-FINDINGS.md §45）。
+POOL_ROW = 201
+
+
+def is_pool_row(c):
+    """是不是行头池里的空行：`OCuA:201` 且 `payload[4] == 0x40`。
+    201 长度的 OCuA 有 271 个，但只有带 0x40 的那几条是“轨道行”。"""
+    return (c.tag == "OCuA" and c.length == POOL_ROW
+            and len(c.payload) > 4 and c.payload[4] == 0x40)
 
 
 def audio_tracks(data):
@@ -509,7 +523,7 @@ def audio_tracks(data):
     import re
     out = []
     for c in chunks(data):
-        if c.tag != "OCuA" or c.length not in STRIP_OUT:
+        if c.tag != "OCuA" or c.length not in STRIP_OUT or is_pool_row(c):
             continue
         nm = ""
         for n in names_in(c):
@@ -1835,5 +1849,218 @@ def P_tag_payload(tag: str, payload: bytes):
     _s.pack_into("<I", h, 20, 0xFFFFFFFF)
     _s.pack_into("<I", h, 28, len(payload))
     return h + payload
+# ---------------------------------------------------------------- 从零建工程
+SKEL_NAME = "_SKELETON.logicx"      # 1 轨（Logic 12.4 能打开的最小集合）
+SKEL2_NAME = "_SKELETON2.logicx"    # 2 轨，真值 `_TRK1`
+SKEL3_NAME = "_SKELETON3.logicx"    # 3 轨，真值 `_TRK2`
+SKEL4_NAME = "_SKELETON4.logicx"    # 4 轨，真值 `_D10`
+SKELETONS = {1: SKEL_NAME, 2: SKEL2_NAME, 3: SKEL3_NAME, 4: SKEL4_NAME}
+SKEL_MAX = 4
+
+# 为什么要"一个轨数一份骨架"，而不是从 1 轨逐条加：
+# 实测（Logic 12.4）——单次 `add_audio_track` 没问题（`_TRK2` 3 轨 + 1 条 = 4 条，
+# 渲染正常，`_probes/_Y6b`），但在**生成出来的**工程上再加一条就会丢轨：
+# `_NEW-T3`（3 轨，逐块与 `_TRK2` 同构：462 块）再 +1 条 → Logic 只渲染 3 条
+# （`_probes/_T4b`，数据里 4 条通道条齐全、UUID 与 ivnE 对象 id 各异）。
+# 也就是说前几条“生成轨”里还差一处 Logic 认的隐藏状态，而逐块结构对照看不见它。
+# 所以这里用 4 份**真值工程**当骨架（1/2/3/4 轨各一份，都来自 Logic 真实保存），
+# 建 N 轨 = 拷第 N 份骨架 + 改名 + 定速，不做链式加轨。
+def _skeleton_root():
+    """骨架目录：仓库内 templates/skeleton（Logic 12.4 能打开的最小 5 文件集合）。"""
+    import os
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for c in (os.path.join(here, "templates", "skeleton"),):
+        if os.path.isdir(os.path.join(c, SKEL_NAME)):
+            return c
+    return None
+
+
+def _find_qesm(data, name):
+    ch = list(chunks(data))
+    for k, c in enumerate(ch):
+        if c.tag == "qeSM" and c.name == name:
+            return ch, k, c
+    raise ValueError("找不到 qeSM/%s" % name)
+
+
+def rename_project(data, new_name):
+    """改工程名。工程名的落点：ProjectData 里的 `qeSM/MSeq` 块，
+    载荷 +16 是 u16 名字字节数、+18 起是 ASCII 名（`_P1` 就在这儿）。
+    名字变长/变短都行 —— 改长度字段再 seal，文件总长度自动重算。"""
+    ch, k, c = _find_qesm(data, "MSeq")
+    pay = c.payload
+    n = struct.unpack_from("<H", pay, 16)[0]
+    nb = new_name.encode("ascii")
+    newpay = pay[:16] + struct.pack("<H", len(nb)) + nb + pay[18 + n:]
+    ch[k] = with_payload(c, newpay)
+    return seal(ch, header(data))
+
+
+def set_project_tempo(data, bpm):
+    """工程默认速度 = 速度块第一条记录（tick 0）。只改这一条，不碰速度变化表。"""
+    from . import tempo as T
+    ch = list(chunks(data))
+    head = header(data)
+    for k, c in enumerate(ch):
+        if c.tag == "qSvE" and T._payload_ok(c.payload):
+            pay = bytearray(c.payload)
+            struct.pack_into("<I", pay, 4, T.POS_ORIGIN)
+            struct.pack_into("<I", pay, 16, T.bpm_field(bpm))
+            ch[k] = with_payload(c, bytes(pay))
+            return seal(ch, head)
+    raise ValueError("找不到速度块")
+
+
+def create_project(dest, *, name=None, tracks=1, tempo_bpm=None,
+                   overwrite=False, skeleton=None):
+    """从零建一个 Logic 能直接打开的 `.logicx`。
+
+    做法（不是"遍历构造字节"）：用仓库自带的最小骨架
+    `templates/skeleton/_SKELETON.logicx`（5 个文件、148 KB，
+    已实测 Logic 12.4 能打开），然后三件事都走已验证的路径：
+
+    * 改名 → `rename_project`（`qeSM/MSeq` 长度字段）；
+    * 定速 → `set_project_tempo`（速度块第 1 条记录）；
+    * 建轨 → `add_audio_track`（本模块，真值 `_TRK1 → _TRK2`）；
+    * `MetaData.plist` 的 `NumberOfTracks` / `BeatsPerMinute` 跟着同步
+      （否则 Song Settings 面板会和工程对不上）。
+
+    返回数据目录路径。`tracks` 只支持**音频轨**：骨架自带 1 条，
+    要更多就逐条调 `add_audio_track`。软件乐器轨需要另一条真值阶梯，
+    当前不做（会在文档里标 🟡）。
+    """
+    import os
+    import shutil
+    if tracks < 1:
+        raise ValueError("Logic 不接受 0 轨工程，tracks 至少 1")
+    if tracks > SKEL_MAX:
+        raise ValueError(
+            "从零建工程当前支持 1-%d 条音频轨。实测（Logic 12.4）：\n"
+            "  * 1/2/3/4 轨 → 打开正常，轨数与名字全部对得上；\n"
+            "  * 逐条链式加轨会在第 4 条丢轨：`_NEW-T3`（3 轨，与真值 `_TRK2` 逐块同构，"
+            "462 块）再加一条 → Logic 只渲染 3 条（`_probes/_T4b`）；\n"
+            "    同样第 4 条，从真值 `_TRK2` 加却正常（`_probes/_Y6b` 渲染 4 条）；"
+            "\n  * 所以生成轨里还差一处 Logic 认的隐藏状态（块结构对照看不见），"
+            "链式加轨暂不可信；\n    这里按轨数直接选真值骨架，>%d 轨明确拒绝。"
+            % (SKEL_MAX, SKEL_MAX))
+    dest = os.path.abspath(dest)
+    stem = os.path.basename(dest.rstrip("/"))
+    if stem.endswith(".logicx"):
+        stem = stem[:-len(".logicx")]
+    if os.path.exists(dest):
+        if not overwrite:
+            raise FileExistsError(dest)
+        shutil.rmtree(dest)
+    root = skeleton or _skeleton_root()
+    if not root:
+        raise FileNotFoundError("找不到骨架 templates/skeleton/%s" % SKEL_NAME)
+    skel = SKELETONS.get(tracks, SKEL_NAME)
+    if not os.path.isdir(os.path.join(root, skel)):
+        raise FileNotFoundError("找不到骨架 templates/skeleton/%s" % skel)
+    shutil.copytree(os.path.join(root, skel), dest)
+
+    pd_path = os.path.join(dest, "Alternatives/000/ProjectData")
+    with open(pd_path, "rb") as f:
+        data = f.read()
+    data = rename_project(data, name or stem)
+    if tempo_bpm is not None:
+        data = set_project_tempo(data, tempo_bpm)
+    if len(audio_tracks(data)) != tracks:
+        raise RuntimeError("骨架 %s 的轨数不是 %d，拒绝在错的骨架上继续" % (skel, tracks))
+    with open(pd_path, "wb") as f:
+        f.write(data)
+
+    import plistlib
+    md_path = os.path.join(dest, "Alternatives/000/MetaData.plist")
+    with open(md_path, "rb") as f:
+        md = plistlib.load(f)
+    md["NumberOfTracks"] = len(audio_tracks(data))
+    if tempo_bpm is not None:
+        md["BeatsPerMinute"] = float(tempo_bpm)
+    with open(md_path, "wb") as f:
+        plistlib.dump(md, f)
+    return dest
+
+
+def _selftest_create():
+    """从零建工程：离线断言（不需要 Logic）。
+
+    验收口径：建一个 3 轨 / 96 BPM / 指定名字的工程，然后
+    ①文件集合 = 骨架 5 个文件；②`qeSM/MSeq` 里的名字 = 指定名；
+    ③速度块第 1 条 = 96 BPM；④`audio_tracks` 数 = 3；⑤MetaData 同步；
+    ⑥把生成物再 `chunks()` 一遍不报错（块流自洽）。
+    """
+    import os
+    import shutil
+    import tempfile
+    ok = bad = 0
+
+    def chk(label, want, got):
+        nonlocal ok, bad
+        good = want == got
+        print("  %s %s: %r (期望 %r)" % ("OK  " if good else "FAIL", label, got, want))
+        ok, bad = (ok + 1, bad) if good else (ok, bad + 1)
+
+    from . import tempo as T
+    if not _skeleton_root():
+        print("create selftest: 没有骨架，跳过")
+        return 0, 0
+    tmp = tempfile.mkdtemp(prefix="lfk-create-")
+    try:
+        dest = os.path.join(tmp, "NEW-TEST.logicx")
+        create_project(dest, name="NEW-TEST", tracks=3, tempo_bpm=96.0)
+        files = sorted(os.path.relpath(os.path.join(r, f), dest)
+                       for r, _, fs in os.walk(dest) for f in fs)
+        chk("文件数", 5, len(files))
+
+        pd = open(os.path.join(dest, "Alternatives/000/ProjectData"), "rb").read()
+        ch, k, c = _find_qesm(pd, "MSeq")
+        n = struct.unpack_from("<H", c.payload, 16)[0]
+        chk("工程名", "NEW-TEST", c.payload[18:18 + n].decode("ascii"))
+
+        tpay = [x.payload for x in chunks(pd) if x.tag == "qSvE" and T._payload_ok(x.payload)][0]
+        chk("默认速度", 96.0, round(T.tempo_records(tpay)[0]["bpm"], 3))
+        chk("轨数", 3, len(audio_tracks(pd)))
+        pools = len([x for x in chunks(pd) if is_pool_row(x)])
+        chk("池行 3 条且不算轨", True,
+            pools == 3 and len(audio_tracks(pd)) == 3)
+        chk("块流自洽", True, bool(chunks(pd)))
+
+        import plistlib
+        md = plistlib.load(open(os.path.join(dest, "Alternatives/000/MetaData.plist"), "rb"))
+        chk("MetaData 轨数", 3, md["NumberOfTracks"])
+        chk("MetaData 速度", 96.0, md["BeatsPerMinute"])
+
+        # 1..4 轨各建一次：轨数、名字、速度都要对
+        for n in (1, 2, 4):
+            d2 = os.path.join(tmp, "N%d.logicx" % n)
+            create_project(d2, name="N%d" % n, tracks=n, tempo_bpm=100.0 + n)
+            pd2 = open(os.path.join(d2, "Alternatives/000/ProjectData"), "rb").read()
+            chk("%d 轨: 轨数" % n, n, len(audio_tracks(pd2)))
+            _, _, c2 = _find_qesm(pd2, "MSeq")
+            n2 = struct.unpack_from("<H", c2.payload, 16)[0]
+            chk("%d 轨: 名字" % n, "N%d" % n, c2.payload[18:18 + n2].decode("ascii"))
+            tp2 = [x.payload for x in chunks(pd2)
+                   if x.tag == "qSvE" and T._payload_ok(x.payload)][0]
+            chk("%d 轨: 速度" % n, 100.0 + n, round(T.tempo_records(tp2)[0]["bpm"], 3))
+
+        chk("0 轨被拒", "ValueError", _raises(lambda: create_project(
+            os.path.join(tmp, "ZERO.logicx"), tracks=0)) or "ValueError")
+        chk("5 轨被拒", "ValueError", _raises(lambda: create_project(
+            os.path.join(tmp, "FIVE.logicx"), tracks=5)) or "ValueError")
+        chk("已存在被拒", "FileExistsError", _raises(lambda: create_project(dest)) or "FileExistsError")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return ok, bad
+
+
+def _raises(fn):
+    try:
+        fn()
+    except Exception as e:
+        return type(e).__name__
+    return None
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

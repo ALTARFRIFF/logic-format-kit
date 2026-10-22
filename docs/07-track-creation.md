@@ -208,3 +208,73 @@
 三处与 Summing 的差别就是：①覆盖块换成单个 `UCuA:350`；②`nCuA` 要 +4；③新 `qeSM` 长度 307，而且它是**把一个既有 `qeSM:305` 缩 2 字节**得来的，不是纯新增。
 
 `add_stack(kind="folder")` 目前仍抛 `NotImplementedError`：配方已完整，但 Summing 版本本身还产不出可打开的工程（见 `_templates/PROJECTDATA-FINDINGS.md` §39），Folder 走同一路径只会得到同样不可打开的文件。**不交付半成品。**
+
+
+---
+
+## 12. 从零建一个能打开的 `.logicx`（`create_project`）
+
+`logicfmt.project.create_project(dest, name=..., tracks=N, tempo_bpm=...)`
+建一个**全新**工程：不依赖用户已有工程，也不需要在 Logic 里点任何东西。
+
+### 12.1 骨架：只要 5 个文件（实测）
+
+一个 `.logicx` 是目录，Logic 12.4 打开一个**没有音频文件**的空工程只需要：
+
+```
+Alternatives/000/ProjectData            主数据（块流）
+Alternatives/000/MetaData.plist         工程摘要（轨数、BPM、拍号…）
+Alternatives/000/DisplayState.plist     界面状态
+Alternatives/000/DisplayStateArchive    界面状态（二进制）
+Resources/ProjectInformation.plist      工程信息/名字
+```
+
+`WindowImage.jpg`（135 KB 缩略图）、`Project File Backups/`、`Autosave/`、
+`Undo Data.nosync/` 都可以没有：删掉后 Logic 照样打开（`_probes/_SKEL-MIN` 实测）。
+
+### 12.2 建 N 轨 = 拷第 N 份真值骨架 + 改名 + 定速
+
+| 轨数 | 骨架 | 来源 |
+|---|---|---|
+| 1 | `templates/skeleton/_SKELETON.logicx` | `_P1` 的最小 5 文件版 |
+| 2 | `_SKELETON2.logicx` | 真值 `_TRK1` |
+| 3 | `_SKELETON3.logicx` | 真值 `_TRK2` |
+| 4 | `_SKELETON4.logicx` | `_TRK2` + `add_audio_track`（Logic 实测 4 条可见） |
+
+改三样东西：
+
+1. **工程名** —— `ProjectData` 里 `qeSM/MSeq` 块，载荷 `+16` 是 u16 名字字节数、
+   `+18` 起是 ASCII；改长度字段后 `seal()` 会把文件总长度重算（`rename_project`）。
+2. **默认速度** —— 速度块 `qSvE` 的**第一条记录**（tick 0），`+16` 是 BPM 定点字段；
+   只改这一条，速度变化表不动（`set_project_tempo`）。
+3. **`MetaData.plist` 的 `NumberOfTracks` / `BeatsPerMinute`** —— 不同步的话
+   Song Settings 面板会和工程显示不一致。
+
+### 12.3 实测验收（Logic 12.4，逐项打开看）
+
+| 工程 | 请求 | Logic 显示 | 速度 |
+|---|---|---|---|
+| `_SKEL-MIN` | 骨架本身 | 1 轨 | 120 |
+| `_NEW-TEST2` | 2 轨 | 2 轨（Audio 1-2） | 120 |
+| `_NEW-T3` | 3 轨 / 96 BPM | 3 轨（Audio 1-3） | 96 ✔ |
+| `_NEW-T4E` | 4 轨 / 110 BPM | 4 轨（Audio 1-4） | 110 ✔ |
+
+工程名也一并核对：文档里写的名字与 Logic 文档标题一致。
+
+### 12.4 一个必须知道的坑：**不要链式加轨**
+
+`add_audio_track` 单次是好的：
+
+* 真值 `_TRK2`（3 轨）+ 1 条 → Logic 显示 **4 条**（`_probes/_Y6b` ✔）。
+
+但在**生成出来的**工程上再加就会丢轨：
+
+* `_NEW-T3`（3 轨，和真值 `_TRK2` **逐块同构**：462 块、同 tag/length 序列）
+  再加 1 条 → 数据里 4 条通道条齐全（UUID 各不相同、ivnE 对象 id 0x09/0x49/0x89/0xC9、
+  池行 4/5/6、471 块），**Logic 只渲染 3 条**（`_probes/_T4b`）。
+
+唯一看到相关的差异是 `gnoS/Song` 载荷 `+136` 的 u32：真值 3 轨工程是 `2048`，
+生成的是 `0`（1/2 轨的真值也是 0）。手工把它改成 2048 **没有**解决问题
+（`_probes/_T4c` 仍是 3 条），所以还有别的一处隐藏状态没找到。
+结论：**按轨数选真值骨架，不链式加**；>4 轨 `create_project` 直接拒绝并说明原因，
+而不是给出一个 Logic 会悄悄少一条轨的文件。

@@ -3882,3 +3882,57 @@ osascript -e 'tell application "Logic Pro" to activate' -e 'delay 0.4' \
 - 真值阶梯：`_MV-BASE`（Logic 保存 138,207 B）↔ `_MV-ONE`（+112 B，1 条音符）证明
   “录音新增音符”的增量；但**“新增一个区域”的干净真值仍未取到**（录音始终并进已有区域），
   所以复制的验收靠 Logic 读回（区域数 + 名字 + 起点 + 事件表），不是逐字节。
+
+---
+
+## §49 从零建工程：骨架 5 文件、工程名字段、默认速度记录
+
+### §49.1 最小骨架（Logic 12.4 实测）
+
+`_P1` 复制成 `_SKEL-MIN.logicx` 后只剩 5 个文件：
+
+```
+Alternatives/000/ProjectData            130,647 B
+Alternatives/000/MetaData.plist             576 B
+Alternatives/000/DisplayState.plist       4,031 B
+Alternatives/000/DisplayStateArchive      7,062 B
+Resources/ProjectInformation.plist          255 B
+```
+
+删掉的 `WindowImage.jpg`(135,488 B)、`Project File Backups/`、`Autosave/`、
+`Undo Data.nosync/` 都不影响打开（Logic 打开 `_SKEL-MIN` 成功，1 轨 Audio 1）。
+
+### §49.2 工程名 = `qeSM/MSeq`，载荷 +16 是 u16 长度
+
+`_P1` 的 ProjectData 里 `_P1` 只出现一次：
+
+```
+chunk qeSM MSeq len=301
+payload[16..18] = 03 00        # u16 LE 名字字节数
+payload[18..21] = "_P1"
+```
+
+改名后按 `with_payload` + `seal` 重算（`project.rename_project`）。长度可任意变，
+文件总长度在 `seal` 里由头部 +16 重算，不需要手工搬偏移。
+
+### §49.3 默认速度 = 速度块第一条记录
+
+`qSvE/EvSq` 载荷第 1 条记录（`tempo.DEFAULT_SIZE` 之前）就是工程默认速度：
+`+4` tick、`+16` BPM 定点。只改 `+4/+16` 即可，其余记录（速度变化）不动
+（`project.set_project_tempo`）。实测 `_NEW-T3` 96、`_NEW-T4E` 110，Logic 控制栏读回一致。
+
+### §49.4 链式加轨会在第 4 条丢轨（未解，已避开）
+
+* 真值 `_TRK2`(3 轨) + `add_audio_track` → Logic 显示 4 条 ✔（`_Y6b`）
+* 生成 `_NEW-T3`(3 轨，462 块，与 `_TRK2` 逐块同构) + `add_audio_track` → 只显示 3 条 ✘
+  （`_T4b`：数据 471 块、4 条通道条、UUID 各异、ivnE id 0x09/0x49/0x89/0xC9、池行 4/5/6）
+* 两者差异：`gnoS/Song` 载荷 `+136` u32 = `2048`（真值 ≥3 轨）vs `0`（生成轨）。
+  手工置 2048 无效（`_T4c` 仍 3 条），说明还有别的隐藏状态。
+* 结论：`create_project` 按轨数选 4 份真值骨架（`_P1`/`_TRK1`/`_TRK2`/`_TRK2+add`），
+  不链式加轨；>4 轨明确拒绝，避免产物悄悄少一条轨。
+
+### §49.5 顺带修正：`audio_tracks()` 曾把行头池当轨
+
+`OCuA:201` 里有 271 个，但只有 `payload[4] == 0x40` 的那几条是“轨道行”（池行）。
+按长度过滤会把 3 条池行当成 3 条轨（`_P1` 曾读出 4 条轨）。现在用
+`is_pool_row()` 判断（tag OCuA + 201 B + payload[4]==0x40），`_P1` 正确读出 1 条。
