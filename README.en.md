@@ -1,5 +1,7 @@
 # logic-format-kit
 
+[English](README.en.md) | [简体中文](README.md)
+
 **Format notes and a reference implementation for Logic Pro's `.patch` / `.cst` / `.logicx` files.**
 
 For anyone who needs to **generate or modify Logic files outside Logic** — especially so that an AI agent can do it autonomously.
