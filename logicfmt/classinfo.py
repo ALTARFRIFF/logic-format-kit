@@ -211,7 +211,12 @@ def describe_blob(blob: bytes) -> dict:
                    len_field_matches=(struct.unpack_from("<I", b, 8)[0] == len(b) - 12),
                    decompresses=_try_zlib(b[16:], declared))
     else:
-        out.update(family="unknown", container="?")
+        # 未解容器：把 4 字节 magic 作为证据报出来，别静默当空气
+        magic = b[:4].decode("latin-1")
+        out.update(family="unknown", container="?",
+                   magic=magic if magic.isprintable() else None,
+                   note="未解容器：读得到、写不了。已知样本：Polyverse `PvWr`(44B)、"
+                        "Slate `FrAr`(2522B)、WaveShell —— 缺真值对照对，不做盲探。")
     return out
 
 
@@ -337,6 +342,13 @@ def _selftest() -> int:
     ok = bad = skip = 0
     paths = ensure_tools()
     print(f"  tools: {paths['classinfo']}")
+    # 未解容器：合成样本（不需要装任何插件）——必须报得出 magic，且不许假装认识
+    for tag, size in ((b"PvWr", 44), (b"FrAr", 2522)):
+        d = describe_blob(tag + b"\x00" * (size - 4))
+        good = d["family"] == "unknown" and d.get("magic") == tag.decode()
+        print(f"  {'OK  ' if good else 'FAIL'} {tag.decode():5s} 合成 {size}B  "
+              f"family={d['family']} magic={d.get('magic')}")
+        ok, bad = (ok + 1, bad) if good else (ok, bad + 1)
     for au_type, sub, mfr, fam, writable in PROBES:
         try:
             ci = class_info(au_type, sub, mfr)
