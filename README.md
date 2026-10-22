@@ -40,13 +40,15 @@ Logic Pro 的文件格式没有公开文档。想批量做 77 条通道条预设
 | 从零新建 Folder Stack | ✅ **实测** | `add_stack(kind="folder")`：`_S-BASE` → 132,502 B / 452 块，与手工 `_F-FOLDER` 的 `(tag,length)` 序列逐块一致；Logic 读回 `is_stack: true`、`kind: "reduced"`、`child_count: 9`、无 output 槽，与手工参考**逐字段相同**。收尾必须重跑两遍 `normalize_counters` + `link_strip_envs` |
 | 真插入（真让文件变长） | ✅ **已验证** | `insert_in_payload` + `seal`，往 `qSvE` 插记录实测通过 |
 | **BPM 变化（任意小节）** | ✅ 实测通过（`logicfmt/tempo.py`） | 位置 = tick+38400，值 = BPM×10000 |
-| Marker 位置 / 移动 | ✅ **已验证**（`qSvE` 内 48 字节记录，位置在记录 `+5`）｜新增 🟡 记录数与名字数都参与计数、同时加仍不增（20+ 个单变量实验已归档） | `logicfmt/markers.py` |
+| 删除音频轨（任意位置） | ✅ **Logic 实测通过** | `project.remove_audio_track()`；退役空行 `+81=0x08`、配对 `ivnE+455`、`karT` 家族 `0x40000`；末条 `_RM-TEST`、中间 `_RMID2` 两轮验收 |
+| MIDI 区域移动 / 复制 | ✅ **Logic 实测通过** | `midi.move_region()` / `midi.copy_region()`；移动只改两处刻度，复制走 donor + 整段搬音符；`_MV-TEST`（1/5/9/15/17 小节）、`_CPY2`（6 个区域、音符逐条一致） |
+| Marker 位置 / 移动 | ✅ **已验证**（`qSvE` 内 48 字节记录，位置在记录 `+5`）｜新增 🟡 卡点=`qSvE` 对象 id 与保存后编号必须一致（gnoS 那 80 字节已证伪） | `logicfmt/markers.py`；证据见 findings §50.8 |
 | 自动化曲线（音量） | ✅ **已用 Logic 验收**（16 字节采样记录，值在 `+11`，位置在 `+4`）| `logicfmt/automation.py` |
 | MIDI 音符（区域内的音符新增/改）| ✅ Logic 读回验收 | `logicfmt/midi.py` |
 | MIDI 控制器数值（延音 CC64 / 表情 CC11 / 调制 CC1）| ✅ 就地改，Logic 读回验收 | `logicfmt/midi.py` |
 | MIDI 控制器新增 | 🟡 容器里混着音符时拒绝追加 | — |
 | MIDI 区域本身（新建一个区域）| 🟡 需要区域对象 + 轨道行 + 登记 | — |
-| 从零生成 `.logicx` | ❌ 不推荐 | 模板 + 改写 |
+| 从零拼 `.logicx` 的字节流 | ❌ 不推荐 | 走 5 文件骨架（`create_project()`），不遍历构造块流 |
 
 **覆盖数字**：实测样本库 747 个插件状态 blob，**732 个（98.0%）** 可按键名读写，涉及 62 638 个具名参数。
 

@@ -36,14 +36,16 @@ This kit decodes those formats far enough to read and write them directly, and �
 | Create an audio track from scratch (**runtime**) | ✅ **usable** | Logic creates it, everything else is offline, see `docs/07` |
 | Create an audio track from scratch (**pure offline**) | ✅ **verified in Logic** | `logicfmt/project.py: add_audio_track()`, see `docs/07` |
 | Create a whole project from scratch (**pure offline**) | ✅ **verified in Logic** (1-4 tracks) | `project.create_project()`: 5-file skeleton + rename + tempo; `_NEW-T3` (3 tracks / 96 BPM), `_NEW-T4E` (4 tracks / 110 BPM); >4 tracks refused, see `docs/07` §12 |
-| Create a summing stack from scratch | ✅ runtime / 🟡 pure offline | offline: row + strip correct, Logic does not expose the disclosure arrow |
+| Create a summing stack from scratch (**pure offline**) | ✅ **verified in Logic** | `add_stack(kind="summing")`: `_S-BASE` -> 132,596 B / 452 blocks, identical `(tag,length)` sequence to the hand-made `_S-STACK`; same UUID written in three places |
 | Real insertion (grow the file) | ✅ **verified** | `insert_in_payload` + `seal`, tested on a `qSvE` record |
-| Markers | ✅ move/rename verified · 🟡 create offline unresolved | `logicfmt/markers.py`; create via the runtime tool |
+| Delete an audio track (any position) | ✅ **verified in Logic** | `project.remove_audio_track()`; retired row `+81=0x08`, `ivnE+455` pairing, `karT` family `0x40000`; verified on the last track and on a middle track |
+| Move / copy a MIDI region | ✅ **verified in Logic** | `midi.move_region()` (two tick fields only) / `midi.copy_region()` (donor object + whole note container); `_MV-TEST` read 1/5/9/15/17, `_CPY2` read 6 regions with identical notes |
+| Markers | ✅ move/rename verified · 🟡 create offline unresolved | `logicfmt/markers.py`; blocker = `qSvE` object ids must match the post-save numbering (the gnoS 80 bytes are disproven), see findings §50.8 |
 | MIDI notes (add / edit inside a region) | ✅ **verified in Logic** | `logicfmt/midi.py`: 32-byte records in a `qSvE` container |
 | MIDI controller values (CC64 sustain / CC11 / CC1) | ✅ **verified in Logic** | `0xb0`, 48-byte record: `+11` value, `+12` number |
 | Add a MIDI controller event | 🟡 refused while the container mixes note records | — |
 | Create a MIDI region itself | 🟡 needs region object + track row + registry | same weight as creating a track |
-| Generate a `.logicx` from nothing | ❌ not recommended | template + edit |
+| Generate the `.logicx` chunk stream from nothing | ❌ not recommended | use the 5-file skeleton (`create_project()`) instead |
 | Insert/delete fixed-size records | ❌ not implemented | use template slots |
 | Generate a `.logicx` from scratch | ❌ not recommended | template + rewrite |
 
