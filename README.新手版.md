@@ -264,6 +264,8 @@ AI 干完会说「改好了」。**不要信这句话，去看文件**：
 2. 把剩下的 "Audio 3" 改名叫 "Bass"，推子压到 -9 dB，声像往左 20
 
 改之前备份整个 .logicx。
+用 logicfmt/project.py 的 remove_audio_track() / rename_channel()、logicfmt/mixer.py 的
+set_volume() / set_pan()，不要手搓字节。
 改完把读回来的轨道清单（第几条 / 名字 / 音量 / 声像）列给我。
 ```
 
