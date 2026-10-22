@@ -4003,3 +4003,25 @@ qSvE:EvSq      16 → 64       (+48)   ← 该条的载荷尾部保留原 16 字
   可靠做法是 `osascript` 激活 Logic + ⌘S，实测每次都写入（见 §50.1 的 135,225 → 135,123）。
 * **键命令本身是活的**：`logic_trigger_key_command("Create Marker")` 之后
   Marker 列表确实多了一条 —— 所以“键命令全坏”这条旧结论不成立，坏的只是 Save 那条。
+
+### §46.4 删**中间**轨：Logic 真值已补（`_RMID`）
+
+旧边界“只验删最后一条”已解除。做法：`_TRK2` 复制成 `_RMID.logicx`，在 Logic 里选中
+`Audio 2`、菜单 **Track ▸ Delete Track**、⌘S，得到真值 `_probes/_TRUTH-SMID.bin`
+（134,309 B / 459 块）。
+
+离线 `remove_audio_track(_TRK2, index=1)` 结果 133,865 B / 458 块，与真值差**只有两样**：
+
+| 差异 | 真值 | 我们 | 性质 |
+|---|---|---|---|
+| `snrT:snrT` 块 | 有（468 B，载荷首 u32 = 自身长度） | 无 | Logic 的**撤销记录**（旧状态备份），不是轨道状态 |
+| `gnoS/Song` | 21,198 | 21,158 | 同一撤销记录的登记行（+40 B） |
+
+逐块比对（去掉 `snrT`/`MroC`、`gnoS` 只比块序）与真值**完全一致**；
+轨名保持 `Audio 1` / `Audio 3`（不重编号）。
+
+**Logic 实测**：把离线结果写成 `_RMID2.logicx` 打开，`logic_list_tracks` = 2 条
+（Audio 1、Audio 3），无 Read Error。→ 中间位置删除 ✅。
+
+副作用说明：因为我们不写 `snrT`，这条离线删除**不能用 ⌘Z 撤销**（Logic 里没有那条撤销记录）。
+这是“离线编辑”的预期行为，文档里要写明。

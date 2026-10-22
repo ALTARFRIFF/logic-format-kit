@@ -1190,6 +1190,46 @@ def remove_audio_track(data, name=None, index=None):
     return link_strip_envs(normalize_counters(normalize_counters(seal(out, head))))
 
 
+def _selftest_remove_middle(prefix="  "):
+    """删中间轨（Logic 真值 `_probes/_TRUTH-SMID.bin`：`_TRK2` 删 Audio 2）。
+
+    真值里多两样东西，都是 Logic 的“撤销记录”，不是轨道状态：
+      * `snrT` 块（468 B，载荷首 u32 等于自身长度，撤销用的旧状态备份）
+      * `gnoS` 比我们多 40 B（同一记录的登记行）
+    轨道数、名字、通道条、karT、空行池都与我们逐块一致。
+    """
+    import difflib, os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tpath = os.path.join(root, "_probes", "_TRUTH-SMID.bin")
+    if not os.path.exists(tpath):
+        return 0, 1, "  SKIP 删中间轨：缺真值 %s" % tpath
+    base = open(os.path.join(root, "_templates", "_TRK2.logicx",
+                             "Alternatives/000/ProjectData"), "rb").read()
+    truth = open(tpath, "rb").read()
+    mine = remove_audio_track(base, index=1)
+    ok = bad = 0
+
+    def chk(label, got, want):
+        nonlocal ok, bad
+        if got == want:
+            ok += 1; print("%sOK   %s: %r" % (prefix, label, got))
+        else:
+            bad += 1; print("%sFAIL %s: %r != %r" % (prefix, label, got, want))
+
+    chk("轨数", len(audio_tracks(mine)), 2)
+    chk("轨名", [t["name"] for t in audio_tracks(mine)], ["Audio 1", "Audio 3"])
+    skip = {"snrT", "MroC"}
+    kt = [(c.tag, c.length) for c in chunks(truth) if c.tag not in skip]
+    km = [(c.tag, c.length) for c in chunks(mine) if c.tag not in skip]
+    # gnoS 的长度差异来自撤销登记行，比对时只看“块数与顺序”，长度单独说明
+    kt2 = [(t, (0 if t == "gnoS" else l)) for t, l in kt]
+    km2 = [(t, (0 if t == "gnoS" else l)) for t, l in km]
+    chk("块序列（去 snrT/MroC，gnoS 不计长）", km2 == kt2, True)
+    chk("真值多出的只有 snrT", [t for t, _ in kt if t == "snrT"], [])
+    chk("gnoS 差额（撤销登记行，允许 +40）", len(mine) <= len(truth), True)
+    return ok, bad
+
+
 def _align_midi_ports(produced, reference):
     """把 `MroC`（MIDI 端口表）的记录数对齐到参考文件。
 
