@@ -173,3 +173,27 @@ python3 logicfmt/meterkey.py    # meter/key selftest OK
 ```
 
 这类测试覆盖"编码/解码自洽"，**不覆盖"Logic 是否接受"**。两者都要有。
+
+## 取真值：`tools/pairdiff.py`
+
+任何“新建/删除/移动”的真值都用同一条流水线取：**同一工程、同一 Logic 会话、两次保存，
+中间只做一处改动**。
+
+```bash
+# before.bin / after.bin 是从 .logicx 里拷出来的 Alternatives/000/ProjectData
+python3 tools/pairdiff.py before.bin after.bin --payload 0 --hex
+```
+
+输出三段：块级结构（插入/删除/替换的 `(tag, length)`）、同位置字节差异（只比到第一处
+错位之前）、以及指定块号的载荷级 diff。
+
+两个必须遵守的前提（踩过的坑）：
+
+* **同源**：两个文件必须是同一个工程。换过工程名的两份文件，id 会整体重编号、
+  UUID 会抖动，真正的增量会被淹没（`§50` 的教训）。
+* **存盘手段**：`logic_save_project`（MIDI 键命令 Save）实测不触发保存；用
+  `osascript` 激活 Logic 后发 `⌘S`，再用 `stat -f '%m %z'` 确认写盘。
+
+参考结果：`_MK-PAIR` 工程加一个 Marker，`PA`(130,551 B/444 块) → `PB`(131,842 B/449 块)，
+增量恰好是 3 块对象 + 2 块 `qSxT` + `gnoS` 160 B（见 `PROJECTDATA-FINDINGS.md` §64）。
+
