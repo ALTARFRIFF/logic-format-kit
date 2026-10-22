@@ -12,7 +12,7 @@ For anyone who needs to **generate or modify Logic files outside Logic** — esp
 
 ## What problem this solves
 
-Logic Pro's file formats are undocumented. If you want to produce 77 channel-strip presets in bulk, or have a script change a project's time signature, there is no supported path: no CLI, no API, and `.logicx` is a binary package whose internal structure is unknown.
+Logic Pro's file formats are undocumented. If you want to produce the channel-strip presets in bulk, or have a script change a project's time signature, there is no supported path: no CLI, no API, and `.logicx` is a binary package whose internal structure is unknown.
 
 This kit decodes those formats far enough to read and write them directly, and — just as importantly — documents **what to do when decoding fails**.
 
