@@ -1,5 +1,7 @@
 # logic-format-kit
 
+[English](README.en.md) | [简体中文](README.md)
+
 **Logic Pro 的 `.patch` / `.cst` / `.logicx` 文件格式资料与参考实现。**
 
 给需要**在 Logic 之外生成或修改 Logic 文件**的人——尤其是让 AI 能自主完成这件事。
