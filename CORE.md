@@ -192,6 +192,7 @@ python3 logicfmt/build_test_mk.py --dry-run
 | 和弦轨区域 | ✅ | ✅ | 性质 = 相对根音的音程位图；音阶编码未解 |
 | 通道条：推子/声像/静音/独奏/输出 | ✅ | ✅ | `logicfmt/mixer.py`，39 条断言 |
 | Send 电平/目的地 | ✅ | ✅（改已有） | 新建 Send 未实现；Pre/Post 语义未定 |
+| 删除音频轨 | ✅ 读 | ✅ 删最后一条（Logic 实测通过，`_RM-TEST`）；删中间位置 🟡 无真值 | `project.remove_audio_track()`；退役空行 `+81=0x08`、配对 `ivnE+455`、`karT` 家族 `0x40000` |
 | 新建音频轨 | ✅ | ✅ | `project.add_audio_track()`；**Logic 实测通过**（`_Y5`/`_Y6`）；通道条身份须同时写 `+189` 与 `ivnE+455` |
 | Aux / Stack 主轨 | `ivnE(467)`，`+155` = `05` Aux / `10` Summing / `14` Folder | ✅ 读、改类型、改名；**✅ 离线新建 Summing**（`add_stack(kind="summing")`，三处 UUID 身份链已通）；**✅ 离线新建 Folder**（`add_stack(kind="folder")`，Logic 实测 `is_stack: true` + `kind: "reduced"` + `child_count: 9`，与手工参考逐字段相同）；运行时 `logic_duplicate_track()` ✅ |
 | Stack 成员关系 | Folder = 轨条 `+110`；Summing = 输出路由 | ✅ 读写 |

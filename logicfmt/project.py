@@ -287,6 +287,9 @@ def _selftest(paths: list[str] | None = None) -> int:
     iok, ibad = _selftest_insert()
     ok += iok
     bad += ibad
+    rok, rbad = _selftest_remove()
+    ok += rok
+    bad += rbad
     print(f"{ok} passed, {bad} failed")
     return 0 if bad == 0 else 1
 
@@ -299,6 +302,9 @@ def main(argv=None) -> int:
     cmd = argv.pop(0)
     if cmd == "selftest":
         return _selftest(argv or None)
+    if cmd == "selftest-remove":
+        _ok, _bad = _selftest_remove()
+        return 0 if _bad == 0 else 1
     if not argv:
         raise SystemExit(f"用法: project.py {cmd} <ProjectData>")
     path = argv[0]
@@ -326,6 +332,12 @@ def main(argv=None) -> int:
         print(f"{len(st)} audio-track channel strips")
         for n, t in enumerate(st):
             print(f"  #{n} @{t['pos']:7d} size={t['size']}  {t['names']}")
+        return 0
+
+    if cmd == "rmtrack":
+        out = remove_audio_track(data, name=(argv[1] if len(argv) > 1 else None))
+        open(path + ".rm", "wb").write(out)
+        print(f"{len(data)} B -> {len(out)} B  ({len(out) - len(data):+d})  -> {path}.rm")
         return 0
 
     if cmd == "channels":
@@ -1048,6 +1060,196 @@ def add_audio_track(data, name=None, rnd=None, _shift_env_ids=True):
         out.append(c)
         out.extend(after.get(i, []))
     return link_strip_envs(normalize_counters(normalize_counters(seal(out, head))))
+
+
+def _row_donor(ch):
+    """找一行「干净的空行」作为退役行模板。
+
+    判据：`OCuA:201`、`payload[4]==0x40`（轨道行而非 Inst）、`+80==0`、
+    `+81==0`。`_DEL-A` 里三行空行只有前两行是干净模板 —— 第三行
+    （`+6 == 文件里最大+1`）在 `+24/+25/+88` 还带额外标志位，拿它当模板
+    会多出 3 个字节的差异。
+    """
+    for i, c in enumerate(ch):
+        if (c.tag == "OCuA" and c.length == 201 and c.payload[4] == 0x40
+                and c.payload[80] == 0 and c.payload[81] == 0):
+            return i
+    raise ValueError("no empty track row (OCuA:201 +80=0 +81=0) to clone")
+
+
+def _kart_track_member(ch, idx):
+    """删轨要摘掉的 `karT:58` 成员。
+
+    实测口径（`_TRK2 → _DEL-A`）：删掉的既不是这一串的第一条，也不是
+    最后一条，而是 **`+8` 家族 `0x40000` 内、`payload[0]==1` 的成员按
+    `payload[8]` 升序的第 `idx` 条**（3 轨工程里是 `0x58/0x5c/0x60`，
+    删第 3 轨摘掉 `0x60`）。用 difflib 去对比两个文件会误判成「删第 1 条」，
+    因为同长度的 `karT:58` 彼此不可区分。
+    """
+    fam = []
+    for i, c in enumerate(ch):
+        if c.tag != "karT" or c.length != 58:
+            continue
+        if struct.unpack_from("<I", c.raw, 8)[0] != 0x40000:
+            continue
+        if c.payload[0] != 1:
+            continue
+        fam.append((struct.unpack_from("<I", c.payload, 8)[0], i))
+    fam.sort()
+    if idx >= len(fam):
+        raise ValueError(f"karT family 0x40000 has {len(fam)} track members, "
+                         f"cannot remove index {idx}")
+    return fam[idx][1]
+
+
+def remove_audio_track(data, name=None, index=None):
+    """删除一条音频轨。验收：对 `_TRK2`（3 轨）执行后与真实 `_DEL-A`（2 轨）
+    对比 —— 文件大小 133,565、458 个块的签名序列、逐块载荷全部对上。
+
+    配方（4 步，全部来自 `_TRK2 → _DEL-A` 真值）：
+
+    1. 通道条三元组 `OCuA:237 / UCuA:303 / UCuA:348`（10,803 B）→ 换成
+       **一行退役空行 `OCuA:201`**（4,862 B）：`+6` = 该轨序号、名字 = 原轨名、
+       `+80` 保持 0、**`+81 = 0x08`**（退役标记，活轨为 0）、
+       `+153..168`（行 UUID）清零。
+    2. 配对的 `ivnE:471` 整块删除 —— 判据是载荷 `+455` 起 16 字节等于通道条
+       载荷 `+189` 起 16 字节（不是按名字：重名轨会误删）。
+    3. `karT:58` 里属于该轨的那一条删除（见 `_kart_track_member`）。
+    4. `gnoS / qSvE / qeSM` 的**长度一律不变**，但它们内部的计数器会变，
+       交给 `normalize_counters()` 按普查值重写。
+
+    已知边界：真值只覆盖「删最后一条轨」。删中间位置的轨行序号会整体前移，
+    但没有真值样本，暂不声称已支持。
+    """
+    ch = list(chunks(data))
+    head = header(data)
+
+    strips = audio_strip_runs(ch)
+    if not strips:
+        raise ValueError("no audio track strips")
+    if name is not None:
+        hits = [i for i in strips
+                if bytes(ch[i].payload[61:76]).split(b"\0")[0]
+                == name.encode("utf-8")[:15]]
+        if len(hits) != 1:
+            raise ValueError(f"track name {name!r} matched {len(hits)} strips")
+        si = hits[0]
+    else:
+        si = strips[-1 if index is None else index]
+
+    sp = ch[si].payload
+    idx = sp[6]                                   # 0 起的轨道序号
+    title = bytes(sp[61:76])
+
+    # 1. 退役空行
+    di = _row_donor(ch)
+    rp = bytearray(ch[di].payload)
+    rp[6] = idx
+    rp[61:76] = title + b"\0" * (15 - len(title))
+    rp[80] = 0
+    rp[81] = 0x08
+    rp[153:169] = b"\0" * 16
+    row = _clone(ch[di], bytes(rp))
+
+    # 2. 配对 ivnE：按 UUID，不用名字
+    su = bytes(sp[189:205])
+    ei = None
+    for i in audio_envs(ch):
+        if bytes(ch[i].payload[455:471]) == su:
+            ei = i
+            break
+    if ei is None:
+        raise ValueError(f"no ivnE:471 with uuid {su.hex()} for track {title!r}")
+
+    # 3. karT 成员
+    ki = _kart_track_member(ch, idx)
+
+    drop = {si, si + 1, si + 2, ei, ki}
+    out = []
+    for i, c in enumerate(ch):
+        if i == si:
+            out.append(row)
+        elif i in drop:
+            continue
+        else:
+            out.append(c)
+    return link_strip_envs(normalize_counters(normalize_counters(seal(out, head))))
+
+
+def _align_midi_ports(produced, reference):
+    """把 `MroC`（MIDI 端口表）的记录数对齐到参考文件。
+
+    `MroC` 的载荷是 `[6 字节头][100 字节记录 × n]`，`n` **与轨数无关**：
+    实测 220 个真值工程里 `n` 取 5/6/7 三种，同一台机器同一批保存相同，
+    换一次 MIDI 端口（拔掉 `USB MIDI` 之类）就少一条。删轨不会改它 ——
+    `_TRK2` 与 `_DEL-A` 之差恰好是「保存时那几个失效端口从列表里掉了」，
+    属于环境噪声，不是配方的一部分。比对真值前先对齐它。
+    """
+    ch = list(chunks(produced, strict=False))
+    want = [(len(c.payload) - 6) // 100 for c in chunks(reference, strict=False)
+            if c.tag == "MroC"]
+    k = 0
+    for i, c in enumerate(ch):
+        if c.tag != "MroC":
+            continue
+        n = want[k] if k < len(want) else (len(c.payload) - 6) // 100
+        k += 1
+        pl = bytearray(c.payload[:6 + 100 * n])
+        pl[2] = n
+        ch[i] = with_payload(c, bytes(pl))
+    return seal(ch, header(produced))
+
+
+# 每次保存都会重生成/重编号的块：UUID、计数器、指针
+_VOLATILE = {"gnoS", "qeSM", "qSvE", "ivnE", "karT", "UCuA", "OCuA"}
+
+
+def _selftest_remove():
+    """`_TRK2 --删最后一轨--> 与真值 `_DEL-A` 逐块比对。"""
+    import os
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cands = [os.path.join(here, "templates", "logicx"), os.path.join(here, "..", "_templates")]
+    root = next((c for c in cands if os.path.exists(os.path.join(c, "_DEL-A.logicx"))), None)
+    if root is None:
+        print("remove selftest: _DEL-A not found, skipped")
+        return 0, 0
+    src = open(os.path.join(root, "_TRK2.logicx", "Alternatives/000/ProjectData"), "rb").read()
+    dst = open(os.path.join(root, "_DEL-A.logicx", "Alternatives/000/ProjectData"), "rb").read()
+    got = _align_midi_ports(remove_audio_track(src), dst)
+    ok = bad = 0
+
+    def chk(label, cond, detail=""):
+        nonlocal ok, bad
+        if cond:
+            ok += 1
+        else:
+            bad += 1
+            print(f"  FAIL {label} {detail}")
+
+    chk("size", len(got) == len(dst), f"got {len(got)} want {len(dst)}")
+    gc, dc = chunks(got, strict=False), chunks(dst, strict=False)
+    chk("chunk count", len(gc) == len(dc), f"{len(gc)} vs {len(dc)}")
+    chk("signatures", [(c.tag, c.length) for c in gc] == [(c.tag, c.length) for c in dc])
+    if len(got) == len(dst) and len(gc) == len(dc):
+        dirty = set()
+        residual = 0
+        for a, b in zip(gc, dc):
+            if a.raw == b.raw:
+                continue
+            residual += sum(1 for x, y in zip(a.raw, b.raw) if x != y)
+            dirty.add(a.tag)
+        chk("diffs only in volatile blocks", dirty <= _VOLATILE, sorted(dirty - _VOLATILE))
+        chk("residual bytes <= 400", residual <= 400, f"{residual}")
+        # 结构断言：2 条音频通道条、2 个 ivnE、4 行空行（含 1 行退役）
+        strips = [c for c in gc if c.tag == "OCuA" and c.length in (237, 241, 249)
+                  and c.payload[4] == 0x40]
+        chk("2 audio strips", len(strips) == 2, f"{len(strips)}")
+        chk("2 audio ivnE:471", len(audio_envs(gc)) == 2, str(len(audio_envs(gc))))
+        rows = [c for c in gc if c.tag == "OCuA" and c.length == 201 and c.payload[4] == 0x40]
+        chk("4 empty rows", len(rows) == 4, f"{len(rows)}")
+        chk("1 retired row (+81==8)", sum(1 for c in rows if c.payload[81] == 0x08) == 1)
+    print(f"remove selftest: {ok} passed, {bad} failed")
+    return ok, bad
 
 
 def link_strip_envs(data):
