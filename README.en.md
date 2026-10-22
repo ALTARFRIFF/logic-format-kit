@@ -44,7 +44,7 @@ This kit decodes those formats far enough to read and write them directly, and �
 | MIDI notes (add / edit inside a region) | ✅ **verified in Logic** | `logicfmt/midi.py`: 32-byte records in a `qSvE` container |
 | MIDI controller values (CC64 sustain / CC11 / CC1) | ✅ **verified in Logic** | `0xb0`, 48-byte record: `+11` value, `+12` number |
 | Add a MIDI controller event | 🟡 refused while the container mixes note records | — |
-| Create a MIDI region itself | 🟡 needs region object + track row + registry | same weight as creating a track |
+| Create a MIDI region itself | ✅ **verified in Logic** | `midi.add_region()`: donor object + one 40-byte pair in the `qSvE` registry; `_MR14` read 5 regions |
 | Generate the `.logicx` chunk stream from nothing | ❌ not recommended | use the 5-file skeleton (`create_project()`) instead |
 | Insert/delete fixed-size records | ❌ not implemented | use template slots |
 | Generate a `.logicx` from scratch | ❌ not recommended | template + rewrite |
