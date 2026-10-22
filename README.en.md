@@ -35,6 +35,7 @@ This kit decodes those formats far enough to read and write them directly, and �
 | Stack membership | ✅ **verified** | folder = strip `+110`; summing = output routing |
 | Create an audio track from scratch (**runtime**) | ✅ **usable** | Logic creates it, everything else is offline, see `docs/07` |
 | Create an audio track from scratch (**pure offline**) | ✅ **verified in Logic** | `logicfmt/project.py: add_audio_track()`, see `docs/07` |
+| Create a whole project from scratch (**pure offline**) | ✅ **verified in Logic** (1-4 tracks) | `project.create_project()`: 5-file skeleton + rename + tempo; `_NEW-T3` (3 tracks / 96 BPM), `_NEW-T4E` (4 tracks / 110 BPM); >4 tracks refused, see `docs/07` §12 |
 | Create a summing stack from scratch | ✅ runtime / 🟡 pure offline | offline: row + strip correct, Logic does not expose the disclosure arrow |
 | Real insertion (grow the file) | ✅ **verified** | `insert_in_payload` + `seal`, tested on a `qSvE` record |
 | Markers | ✅ move/rename verified · 🟡 create offline unresolved | `logicfmt/markers.py`; create via the runtime tool |
