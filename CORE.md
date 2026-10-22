@@ -191,7 +191,7 @@ python3 logicfmt/build_test_mk.py --dry-run
 | 调号变化（任意小节） | ✅ | ✅ | code = (minor?0x10:0) \| (7+升降号) |
 | 和弦轨区域 | ✅ | ✅ | 性质 = 相对根音的音程位图；音阶编码未解 |
 | 通道条：推子/声像/静音/独奏/输出 | ✅ | ✅ | `logicfmt/mixer.py`，39 条断言 |
-| Send 电平/目的地 | ✅ | ✅（改已有） | **新建 Send 未实现**，但增量已采齐（`PROJECTDATA-FINDINGS` §51）：它 = 新建 Aux（`ivnE:469`+`karT:58`+`qeSM:309`+`qSvE:16`）+ 每条通道条 +136 插 4 字节 + 一条 `UCuA:76` 记录 + gnoS 登记；下一轮用 donor 法实现 |
+| Send 电平/目的地 | ✅ | ✅（改已有） | **新建 Send 未实现**，但增量已采齐（`PROJECTDATA-FINDINGS` §63）：它 = 新建 Aux（`ivnE:469`+`karT:58`+`qeSM:309`+`qSvE:16`）+ 每条通道条 +136 插 4 字节 + 一条 `UCuA:76` 记录 + gnoS 登记；下一轮用 donor 法实现 |
 | 删除音频轨 | ✅ 读 | ✅ 任意位置（Logic 实测通过：末条 `_RM-TEST`、中间 `_RMID2`） | `project.remove_audio_track()`；退役空行 `+81=0x08`、配对 `ivnE+455`、`karT` 家族 `0x40000` |
 | 新建音频轨 | ✅ | ✅ | `project.add_audio_track()`；**Logic 实测通过**（`_Y5`/`_Y6`）；通道条身份须同时写 `+189` 与 `ivnE+455` |
 | 从零建工程 `.logicx` | ✅ | ✅ 1-4 轨 | `project.create_project()`；5 文件骨架 + 改名（`qeSM/MSeq`）+ 定速；Logic 实测 `_NEW-T3`（3 轨/96）、`_NEW-T4E`（4 轨/110）；**串行加轨会丢轨**，>4 轨拒绝，见 `docs/07` §12 |
