@@ -198,6 +198,8 @@ python3 logicfmt/build_test_mk.py --dry-run
 | Stack 成员关系 | Folder = 轨条 `+110`；Summing = 输出路由 | ✅ 读写 |
 | 真插入（文件变长） | `insert_in_payload` + `seal` | ✅ 已验证（往 qSvE 插记录） |
 | Tempo / 自动化 / MIDI 音符 | ✅ 可写 | ✅ | MIDI 音符在区域的 `qSvE` 容器里 |
+| MIDI 区域移动 | ✅ | ✅ | `midi.move_region()`：只改两处（对象 `+247` 的 tick×256、登记表记录 `+5` 的 `(tick+34560)/256`）；Logic 实测 `_MV-TEST` 读出 1/5/9/15/17 小节 |
+| MIDI 区域复制 | ✅ | ✅ | `midi.copy_region()`：走 donor 造对象 + 把音符容器整段换成源区域的；Logic 实测 `_CPY2` 读到 `COPY-A`，3 个音符 C3/E3/G3 vel 80 与源区域一致 |
 | Marker 新增 | 🟡 读端上限未解 | — | 移动/改名已可 |
 | 插件参数 | ✅ | ✅ | 见 `docs/02`，98% 状态数 |
 | 任意插件参数（通用兜底） | ✅ | ✅ | L2 ClassInfo；Waves 走 `data` 记录表 |

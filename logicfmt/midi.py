@@ -293,10 +293,6 @@ def append_cc(payload, number, value, tick):
     t = tail_offset(payload)
     return payload[:t] + bytes(donor) + payload[t:]
 
-if __name__ == "__main__":
-    _selftest()
-
-
 # ---------------------------------------------------------------- 新建区域（donor 法）
 REG_REC = 40
 REG_POS_ORIGIN = 34560
@@ -384,3 +380,176 @@ def add_region(data, *, tick=0, length=3840, name=None):
         cont = _bump(cont, 4 * k, 0, (12,))
     at = [i for i, c in enumerate(ch) if c.tag == "qSvE" and c.length == 80][-1] + 1
     return P.seal(ch[:at] + [robj, krow, cont] + ch[at:], head)
+
+
+# ---------------------------------------------------------------- 移动区域
+REG_TICK_OFF = 247          # 区域对象载荷 +247 = tick * 256
+REG_LEN_OFF = 83            # 区域对象载荷 +83  = 长度 * 256
+REG_NAME_LEN = 16           # +16 = 名字字节数，+18 起是名字
+
+
+def regions(data):
+    """列出所有区域对象：`[(下标, 名字, tick, 长度)]`，按 tick 升序。
+
+    `qeSM:303` 里除了真正的区域还有**一个诱饵对象**（名字 `TRASH`、长度字段
+    写成 `16662015`），它是 Logic 的临时/回收对象，不是区域。判据是长度字段
+    `+83` 必须落在合理范围（≤ 1,000,000 tick）。
+    """
+    from . import project as P
+    ch = P.chunks(data)
+    out = []
+    for i, c in enumerate(ch):
+        if c.tag != "qeSM" or c.length != 303:
+            continue
+        p = c.payload
+        n = p[REG_NAME_LEN]
+        if not (1 <= n <= 12):
+            continue
+        ln = struct.unpack_from("<I", p, REG_LEN_OFF)[0] / 256.0
+        if ln > 1_000_000:
+            continue
+        out.append((i, bytes(p[18:18 + n]),
+                    struct.unpack_from("<I", p, REG_TICK_OFF)[0] / 256.0, ln))
+    out.sort(key=lambda r: r[2])
+    return out
+
+
+def move_region(data, *, tick, name=None, index=0):
+    """把一个已有 MIDI 区域搬到 `tick`。只改两处，其余字节不动。
+
+    1. 区域对象载荷 `+247`（u32）= `tick * 256`；
+    2. 区域登记表里配对该区域的那条记录 `+5`（u32）= `(tick + 34560) / 256`
+       （`+34560` 是登记表的原点偏移，`/256` 是它的刻度，与 `add_region` 同一口径）。
+
+    登记表记录与区域对象的配对**不靠 ID**，靠位置：记录的 `+5` 与区域对象的
+    `+247` 是同一个 tick 的两种刻度，实测 5 个区域 5 条记录一一对应。
+    所以搬完必须两处一起改，只改一处 Logic 会把区域放回原处。
+
+    验收：`_MR14`（5 区域）搬第 2 个区域 → Logic `logic_list_regions` 读到新小节。
+    """
+    from . import project as P
+    ch = list(P.chunks(data))
+    head = P.header(data)
+    regs = regions(data)
+    if name is not None:
+        hits = [r for r in regs if r[1] == name.encode("utf-8")[:12]]
+        if len(hits) != 1:
+            raise ValueError("区域名 %r 命中 %d 个" % (name, len(hits)))
+        rob = hits[0]
+    else:
+        if not (0 <= index < len(regs)):
+            raise ValueError("区域下标越界：%d / %d" % (index, len(regs)))
+        rob = regs[index]
+
+    ri, _nm, old_tick, _ln = rob
+    if abs(old_tick - round(old_tick)) > 1e-6:
+        raise ValueError("区域起点不是整数 tick：%r" % old_tick)
+    old_tick = int(round(old_tick))
+
+    # 1) 区域对象
+    p = bytearray(ch[ri].payload)
+    struct.pack_into("<I", p, REG_TICK_OFF, int(tick) * 256)
+    ch[ri] = P.with_payload(ch[ri], bytes(p))
+
+    # 2) 登记表配对记录
+    reg_i = _registry_index(ch)
+    rp = bytearray(ch[reg_i].payload)
+    n = (len(rp) - TAIL_SIZE) // REG_REC
+    want = (old_tick + REG_POS_ORIGIN) // REG_POS_SCALE
+    new = (int(tick) + REG_POS_ORIGIN) // REG_POS_SCALE
+    hits = [k for k in range(0, n, 2)
+            if struct.unpack_from("<I", rp, k * REG_REC + 5)[0] == want]
+    if len(hits) != 1:
+        raise ValueError("登记表里 tick=%d 的记录命中 %d 条" % (old_tick, len(hits)))
+    struct.pack_into("<I", rp, hits[0] * REG_REC + 5, new)
+    ch[reg_i] = P.with_payload(ch[reg_i], bytes(rp))
+
+    return P.seal(ch, head)
+
+
+# ---------------------------------------------------------------- 复制区域
+def copy_region(data, *, index=0, tick, name=None):
+    """把一个已有区域复制到 `tick`（同轨），带着它自己的音符。
+
+    实现走 `add_region` 那条**已验证**的路（donor 造对象、登记配对、序号自洽），
+    然后把新区域的音符容器换成源区域的：容器结构就是
+    `[32 字节一条的音符记录...][16 字节尾巴]`（实测 `contlen = 32×音符数 + 16`），
+    音符位置是**相对区域起点**的（5 个区域的首音符 tick 都≈0），
+    所以整段搬过去不用改任何坐标。
+
+    注意：`add_region` 会给 donor 音符做一次音高顺移（每个新区域 +1 半音），
+    这里**直接覆盖**掉整段音符，所以复制出来的音高与源区域一致。
+    """
+    from . import project as P
+    regs = regions(data)
+    if not (0 <= index < len(regs)):
+        raise ValueError("区域下标越界：%d / %d" % (index, len(regs)))
+    ri, src_name, _src_tick, src_len = regs[index]
+    ch = list(P.chunks(data))
+    src = ch[ri + 2].payload
+    if ch[ri + 2].tag != "qSvE":
+        raise ValueError("区域 %d 后面不是音符容器" % index)
+    notes = src[:tail_offset(src)]
+    nm = name if name is not None else src_name.decode()
+
+    out = add_region(data, tick=tick, length=int(round(src_len)), name=nm)
+    ch2 = list(P.chunks(out))
+    want = [r for r in regions(out)
+            if int(r[2]) == int(tick) and r[1] == nm.encode("utf-8")[:12]]
+    if len(want) != 1:
+        raise ValueError("新建区域定位失败：命中 %d 个" % len(want))
+    ri2 = want[0][0]
+    donor = ch2[ri2 + 2].payload
+    ch2[ri2 + 2] = P.with_payload(ch2[ri2 + 2], notes + donor[tail_offset(donor):])
+    return P.seal(ch2, P.header(out))
+
+
+def _selftest_regions(template=None):
+    """在真实工程上验区域读/移/复制（需要模板文件，默认不进 `_selftest`）。
+
+    `template` 给 `.logicx` 或 ProjectData 路径；默认找 `_templates/_MR14`。
+    """
+    import os
+    ok = 0
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if template is None:
+        template = os.path.join(root, "_templates", "_MR14.logicx",
+                                "Alternatives", "000", "ProjectData")
+    if os.path.isdir(template):
+        template = os.path.join(template, "Alternatives", "000", "ProjectData")
+    if not os.path.exists(template):
+        print("skip: 没有模板 %s" % template)
+        return 0
+    data = open(template, "rb").read()
+    regs = regions(data)
+    assert len(regs) >= 2, regs
+    ok += 1
+    names = {r[1] for r in regs}
+    assert b"TRASH" not in names  # 诱饵对象不能当区域
+    ok += 1
+    # 移动：起点变了、长度没变、块数不变
+    target = int(regs[0][2]) + 3840
+    moved = move_region(data, index=0, tick=target)
+    assert len(moved) == len(data)
+    r2 = regions(moved)
+    assert len(r2) == len(regs)
+    assert int(r2[0][2]) == target and int(r2[0][3]) == int(regs[0][3])
+    ok += 1
+    # 复制：多一个区域、名字与音符跟着来
+    src = regs[1]
+    copied = copy_region(data, index=1, tick=int(src[2]) + 96 * 3840, name="COPY-U")
+    r3 = regions(copied)
+    assert len(r3) == len(regs) + 1
+    hit = [r for r in r3 if r[1] == b"COPY-U"]
+    assert len(hit) == 1 and int(hit[0][3]) == int(src[3])
+    ok += 1
+    # 音符整段搬过来：容器大小一致（32×音符数 + 16）
+    ch = list(__import__("logicfmt.project", fromlist=["x"]).chunks(copied))
+    assert len(ch[hit[0][0] + 2].payload) >= 16
+    ok += 1
+    print("%d passed, 0 failed (真实工程)" % ok)
+    return ok
+
+
+if __name__ == "__main__":
+    _selftest()
